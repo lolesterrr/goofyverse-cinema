@@ -152,6 +152,22 @@ describe("diary", () => {
     expect((await call(env, "PUT", "/api/diary/entry-x1", entry({ tmdbId: undefined }), kens)).body.error).toBe("tmdbId-required");
   });
 
+  it("keeps a season on a show and drops it from a film", async () => {
+    const show = { tmdbId: 30991, media: "tv", kind: "anime", title: "Cowboy Bebop", year: 1998, poster: "/b.jpg", genres: ["Animation"], runtime: null };
+    const ok = await call(env, "PUT", "/api/diary/show-one", entry({ ...show, season: 1 }), kens);
+    expect(ok.body.entry).toMatchObject({ media: "tv", kind: "anime", season: 1 });
+    const film = await call(env, "PUT", "/api/diary/film-one", entry({ season: 3 }), kens);
+    expect(film.body.entry).toMatchObject({ media: "movie", kind: "movie", season: null });
+    const none = await call(env, "PUT", "/api/diary/show-two", entry({ ...show, season: undefined }), kens);
+    expect(none.body.entry.season).toBeNull();
+  });
+
+  it("rejects bad media, kind and season values", async () => {
+    expect((await call(env, "PUT", "/api/diary/entry-x1", entry({ media: "book" }), kens)).body.error).toBe("media-invalid");
+    expect((await call(env, "PUT", "/api/diary/entry-x1", entry({ kind: "cartoon" }), kens)).body.error).toBe("kind-invalid");
+    expect((await call(env, "PUT", "/api/diary/entry-x1", entry({ media: "tv", season: 0 }), kens)).body.error).toBe("season-invalid");
+  });
+
   it("allows a log without a rating", async () => {
     const r = await call(env, "PUT", "/api/diary/entry-nr", entry({ rating: null }), kens);
     expect(r.status).toBe(200);
@@ -184,6 +200,18 @@ describe("watchlist and movie nights", () => {
     expect((await call(env, "GET", "/api/state", undefined, goof)).body.watchlist).toHaveLength(1);
     await call(env, "DELETE", `/api/watchlist/${first.body.item.id}`, undefined, goof);
     expect((await call(env, "GET", "/api/state", undefined, kens)).body.watchlist).toHaveLength(0);
+  });
+
+  it("treats a film and a show with the same TMDB number as different things", async () => {
+    const env = makeEnv();
+    const kens = await signIn(env, "Kensss");
+    const film = await call(env, "POST", "/api/watchlist", { ...sampleFilm, tmdbId: 555 }, kens);
+    const show = await call(env, "POST", "/api/watchlist", { ...sampleFilm, tmdbId: 555, media: "tv", kind: "series", title: "Some Show" }, kens);
+    expect(film.status).toBe(201);
+    expect(show.status).toBe(201);
+    const again = await call(env, "POST", "/api/watchlist", { ...sampleFilm, tmdbId: 555, media: "tv", kind: "series", title: "Some Show" }, kens);
+    expect(again.body.already).toBe(true);
+    expect((await call(env, "GET", "/api/state", undefined, kens)).body.watchlist).toHaveLength(2);
   });
 
   it("plans a night, tracks RSVPs and deletes it", async () => {
@@ -231,12 +259,26 @@ describe("tmdb proxy", () => {
     let seen;
     globalThis.fetch = vi.fn(async (url, init) => {
       seen = { url: String(url), headers: init.headers };
-      return new Response(JSON.stringify({ results: [{ id: 4977, title: "Paprika", release_date: "2006-11-25", poster_path: "/p.jpg", overview: "Dreams.", vote_average: 7.69 }] }), { status: 200 });
+      return new Response(JSON.stringify({ results: [
+        { id: 4977, media_type: "movie", title: "Paprika", release_date: "2006-11-25", poster_path: "/p.jpg", overview: "Dreams.", vote_average: 7.69, genre_ids: [16, 9648], original_language: "ja" },
+        { id: 99, media_type: "person", name: "Satoshi Kon" },
+        { id: 30991, media_type: "tv", name: "Cowboy Bebop", first_air_date: "1998-10-24", poster_path: "/b.jpg", genre_ids: [16, 10759], original_language: "ja" },
+        { id: 2316, media_type: "tv", name: "The Office", first_air_date: "2005-03-24", poster_path: "/o.jpg", genre_ids: [35], original_language: "en" },
+        { id: 603, media_type: "movie", title: "Heat", release_date: "1995-12-15", genre_ids: [28], original_language: "en" },
+      ] }), { status: 200 });
     });
     const r = await call(env, "GET", "/api/tmdb/search?q=paprika", undefined, token);
     expect(r.status).toBe(200);
-    expect(r.body.results[0]).toEqual({ tmdbId: 4977, title: "Paprika", year: 2006, poster: "/p.jpg", overview: "Dreams.", score: 7.7 });
-    expect(seen.url).toContain("/search/movie");
+    // people are dropped; films, shows and anime are labelled
+    expect(r.body.results.map((x) => [x.title, x.media, x.kind])).toEqual([
+      ["Paprika", "movie", "anime"],
+      ["Cowboy Bebop", "tv", "anime"],
+      ["The Office", "tv", "series"],
+      ["Heat", "movie", "movie"],
+    ]);
+    expect(r.body.results[0]).toEqual({ tmdbId: 4977, media: "movie", kind: "anime", title: "Paprika", year: 2006, poster: "/p.jpg", overview: "Dreams.", score: 7.7 });
+    expect(r.body.results[1].year).toBe(1998);
+    expect(seen.url).toContain("/search/multi");
     expect(seen.url).toContain("query=paprika");
     expect(seen.url).not.toContain("api_key");
     expect(seen.headers.authorization).toBe(`Bearer ${"x".repeat(120)}`);
@@ -253,7 +295,37 @@ describe("tmdb proxy", () => {
     });
     const r = await call(env, "GET", "/api/tmdb/trending", undefined, token);
     expect(r.body.results).toEqual([]);
+    expect(seenUrl).toContain("/trending/all/week");
     expect(seenUrl).toContain("api_key=abc123abc123abc123abc123abc123ab");
+  });
+
+  it("returns show details with seasons, creators and no per-show runtime", async () => {
+    const env = makeEnv({ TMDB_TOKEN: "x".repeat(120) });
+    const token = await signIn(env);
+    let seenUrl;
+    globalThis.fetch = vi.fn(async (url) => {
+      seenUrl = String(url);
+      return new Response(JSON.stringify({
+        id: 30991, name: "Cowboy Bebop", first_air_date: "1998-10-24", poster_path: "/b.jpg", backdrop_path: "/bb.jpg",
+        overview: "Bounty hunters.", tagline: "", episode_run_time: [24], vote_average: 8.7, original_language: "ja",
+        number_of_seasons: 1, number_of_episodes: 26, genres: [{ name: "Animation" }, { name: "Action & Adventure" }],
+        created_by: [{ name: "Hajime Yatate" }],
+      }), { status: 200 });
+    });
+    const r = await call(env, "GET", "/api/tmdb/tv/30991", undefined, token);
+    expect(seenUrl).toContain("/3/tv/30991");
+    expect(r.body).toMatchObject({ tmdbId: 30991, media: "tv", kind: "anime", title: "Cowboy Bebop", year: 1998, seasons: 1, episodes: 26, runtime: null, creators: ["Hajime Yatate"] });
+    expect(r.body.genres).toEqual(["Animation", "Action & Adventure"]);
+    expect((await call(env, "GET", "/api/tmdb/tv/abc", undefined, token)).status).toBe(400);
+  });
+
+  it("calls a Japanese animated film anime in its details too", async () => {
+    const env = makeEnv({ TMDB_TOKEN: "x".repeat(120) });
+    const token = await signIn(env);
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ id: 4977, title: "Paprika", release_date: "2006-11-25", original_language: "ja", genres: [{ name: "Animation" }], credits: { crew: [] } }), { status: 200 }));
+    const r = await call(env, "GET", "/api/tmdb/movie/4977", undefined, token);
+    expect(r.body).toMatchObject({ media: "movie", kind: "anime" });
   });
 
   it("returns film details with genres and directors", async () => {

@@ -200,7 +200,20 @@ function dateOnly(value) {
   return value;
 }
 
+const MEDIA = ["movie", "tv"];
+const KINDS = ["movie", "series", "anime"];
+
+// Anime is not a TMDB category, so call it anime when it is Japanese animation.
+function deriveKind(media, isAnimation, language) {
+  if (isAnimation && language === "ja") return "anime";
+  return media === "tv" ? "series" : "movie";
+}
+
 function film(body) {
+  const media = body.media ?? "movie";
+  if (!MEDIA.includes(media)) throw new HttpError(400, "media-invalid");
+  const kind = body.kind ?? (media === "tv" ? "series" : "movie");
+  if (!KINDS.includes(kind)) throw new HttpError(400, "kind-invalid");
   const poster = body.poster ?? null;
   if (poster !== null && !(typeof poster === "string" && /^\/[A-Za-z0-9_.-]{1,80}$/.test(poster))) {
     throw new HttpError(400, "poster-invalid");
@@ -210,6 +223,8 @@ function film(body) {
   if (!tmdbId) throw new HttpError(400, "tmdbId-required");
   return {
     tmdbId,
+    media,
+    kind,
     title: str(body.title, 200, { required: true, name: "title" }),
     year: intOrNull(body.year, 1870, 2200, "year"),
     poster,
@@ -258,14 +273,24 @@ async function tmdb(env, path, params = {}) {
 
 const yearOf = (d) => (d && /^\d{4}/.test(d) ? Number(d.slice(0, 4)) : null);
 
-const briefFilm = (m) => ({
-  tmdbId: m.id,
-  title: m.title,
-  year: yearOf(m.release_date),
-  poster: m.poster_path || null,
-  overview: (m.overview || "").slice(0, 400),
-  score: typeof m.vote_average === "number" ? Math.round(m.vote_average * 10) / 10 : null,
-});
+// Search, trending and detail results all come out in the same shape. `media` is
+// what TMDB calls it (movie or tv); `kind` is what we show (movie, series, anime).
+function briefFilm(m, mediaType) {
+  const media = m.media_type || mediaType || "movie";
+  return {
+    tmdbId: m.id,
+    media,
+    kind: deriveKind(media, (m.genre_ids || []).includes(16), m.original_language),
+    title: m.title || m.name || "",
+    year: yearOf(m.release_date || m.first_air_date),
+    poster: m.poster_path || null,
+    overview: (m.overview || "").slice(0, 400),
+    score: typeof m.vote_average === "number" ? Math.round(m.vote_average * 10) / 10 : null,
+  };
+}
+
+const isAnimation = (genres = []) => genres.some((g) => g.name === "Animation");
+const onlyMedia = (results = []) => results.filter((m) => !m.media_type || m.media_type === "movie" || m.media_type === "tv");
 
 /* ---------- routes ---------- */
 
@@ -332,9 +357,12 @@ async function route(request, env) {
     }
     const body = await readBody(request);
     const existing = list.find((x) => x.id === id);
+    const f = film(body);
     const entry = {
       id,
-      ...film(body),
+      ...f,
+      // a season only means something for a show
+      season: f.media === "tv" ? intOrNull(body.season, 1, 100, "season") : null,
       rating: ratingOrNull(body.rating),
       review: str(body.review, 4000, { name: "review" }),
       watchedOn: dateOnly(body.watchedOn),
@@ -376,7 +404,8 @@ async function route(request, env) {
     const body = await readBody(request);
     const f = film(body);
     const list = await load(env, KEY.watchlist);
-    const already = list.find((x) => x.tmdbId === f.tmdbId);
+    // a film and a show can share a TMDB number, so the media type is part of the identity
+    const already = list.find((x) => x.tmdbId === f.tmdbId && (x.media || "movie") === f.media);
     if (already) return json({ item: already, already: true });
     const item = { id: newId(), ...f, note: str(body.note, 200, { name: "note" }), addedBy: me, addedAt: nowIso() };
     await save(env, KEY.watchlist, upsert(list, item));
@@ -434,12 +463,13 @@ async function route(request, env) {
   if (method === "GET" && a === "tmdb") {
     if (b === "search" && !c) {
       const q = str(url.searchParams.get("q"), 100, { required: true, name: "q" });
-      const data = await tmdb(env, "/search/movie", { query: q, include_adult: "false", language: "en-US" });
-      return json({ results: (data.results || []).slice(0, 20).map(briefFilm) });
+      // films, shows and anime all come from one search; people are filtered out
+      const data = await tmdb(env, "/search/multi", { query: q, include_adult: "false", language: "en-US" });
+      return json({ results: onlyMedia(data.results).filter((m) => m.media_type).slice(0, 20).map((m) => briefFilm(m)) });
     }
     if (b === "trending" && !c) {
-      const data = await tmdb(env, "/trending/movie/week", { language: "en-US" });
-      return json({ results: (data.results || []).slice(0, 20).map(briefFilm) });
+      const data = await tmdb(env, "/trending/all/week", { language: "en-US" });
+      return json({ results: onlyMedia(data.results).slice(0, 20).map((m) => briefFilm(m)) });
     }
     if (b === "movie" && c) {
       const id = intOrNull(c, 1, 99999999, "id");
@@ -447,12 +477,31 @@ async function route(request, env) {
       const m = await tmdb(env, `/movie/${id}`, { language: "en-US", append_to_response: "credits" });
       const directors = ((m.credits && m.credits.crew) || []).filter((x) => x.job === "Director").map((x) => x.name);
       return json({
-        ...briefFilm(m),
+        ...briefFilm(m, "movie"),
+        kind: deriveKind("movie", isAnimation(m.genres), m.original_language),
         backdrop: m.backdrop_path || null,
         tagline: m.tagline || "",
         genres: (m.genres || []).map((g) => g.name),
         runtime: m.runtime || null,
         directors: directors.slice(0, 3),
+        overview: (m.overview || "").slice(0, 1200),
+      });
+    }
+    if (b === "tv" && c) {
+      const id = intOrNull(c, 1, 99999999, "id");
+      if (!id) throw new HttpError(400, "id-invalid");
+      const m = await tmdb(env, `/tv/${id}`, { language: "en-US" });
+      return json({
+        ...briefFilm(m, "tv"),
+        kind: deriveKind("tv", isAnimation(m.genres), m.original_language),
+        backdrop: m.backdrop_path || null,
+        tagline: m.tagline || "",
+        genres: (m.genres || []).map((g) => g.name),
+        // minutes per episode are not a runtime for the whole show, so none is stored
+        runtime: null,
+        creators: ((m.created_by) || []).map((x) => x.name).slice(0, 3),
+        seasons: m.number_of_seasons || null,
+        episodes: m.number_of_episodes || null,
         overview: (m.overview || "").slice(0, 1200),
       });
     }
