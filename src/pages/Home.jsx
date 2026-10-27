@@ -3,6 +3,7 @@ import { useStore } from "../store.jsx";
 import { countdown, greeting } from "../lib/dates.js";
 import { useNow } from "../lib/hooks.js";
 import { groupByFilm, tasteMatch } from "../lib/taste.js";
+import { filmKey } from "../lib/tmdb.js";
 import Loaded from "../components/Loaded.jsx";
 import { Empty, Marquee, Says } from "../components/Layout.jsx";
 import NightCard from "../components/NightCard.jsx";
@@ -27,8 +28,8 @@ function HomeBody({ data }) {
     .slice(0, 3);
   const other = profiles.find((p) => p !== me);
   const taste = other ? tasteMatch(data.diary[me], data.diary[other]) : null;
-  const seenBy = (item) => profiles.filter((p) => (data.diary[p] || []).some((e) => e.tmdbId === item.tmdbId));
-  const nightFor = (item) => upcoming.find((n) => n.tmdbId === item.tmdbId) || null;
+  const seenBy = (item) => profiles.filter((p) => (data.diary[p] || []).some((e) => filmKey(e) === filmKey(item)));
+  const nightFor = (item) => upcoming.find((n) => filmKey(n) === filmKey(item)) || null;
   const queue = data.watchlist.slice().reverse().slice(0, 6);
 
   return (
@@ -52,7 +53,7 @@ function HomeBody({ data }) {
                   Plan a night
                 </button>
                 <button type="button" className="btn ghost" onClick={() => openModal("log")}>
-                  Log a film
+                  Log something
                 </button>
               </div>
             </div>
@@ -69,7 +70,7 @@ function HomeBody({ data }) {
           <Empty
             action={
               <button type="button" className="btn" onClick={() => openModal("queue")}>
-                Add a film
+                Add to the queue
               </button>
             }
           >
@@ -94,7 +95,7 @@ function HomeBody({ data }) {
             anim="sleep"
             action={
               <button type="button" className="btn" onClick={() => openModal("log")}>
-                Log your first film
+                Log your first title
               </button>
             }
           >
@@ -113,7 +114,7 @@ function HomeBody({ data }) {
           </div>
           {jazz.length === 0 ? (
             <Empty anim="think" action={<button type="button" className="btn ghost" onClick={() => openModal("jazz")}>Add the first thing</button>}>
-              Albums, anime, games, anything. Nothing on the shelf yet.
+              Albums, games, books, anything that isn't a film, series or anime. Nothing on the shelf yet.
             </Empty>
           ) : (
             <div className="jazz-row">

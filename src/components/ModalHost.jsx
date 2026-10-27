@@ -3,8 +3,9 @@ import { api } from "../api.js";
 import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
 import { fmtDay } from "../lib/dates.js";
-import { backdropUrl, toFilm } from "../lib/tmdb.js";
+import { backdropUrl, filmKey, toFilm } from "../lib/tmdb.js";
 import FilmPicker from "./FilmPicker.jsx";
+import KindBadge, { seasonLabel } from "./KindBadge.jsx";
 import Modal from "./Modal.jsx";
 import Poster from "./Poster.jsx";
 import { Stars } from "./Stars.jsx";
@@ -18,13 +19,13 @@ function FilmDetails({ film }) {
   useEffect(() => {
     let alive = true;
     api
-      .movie(film.tmdbId)
+      .details(film)
       .then((d) => alive && setInfo(d))
       .catch((e) => alive && setErr(e));
     return () => {
       alive = false;
     };
-  }, [film.tmdbId]);
+  }, [film.tmdbId, film.media]);
 
   const stored = toFilm(info || film);
   const logs = data
@@ -32,12 +33,12 @@ function FilmDetails({ film }) {
         .map(([profile, list]) => ({
           profile,
           entry: list
-            .filter((e) => e.tmdbId === film.tmdbId)
+            .filter((e) => filmKey(e) === filmKey(film))
             .sort((a, b) => `${b.watchedOn}${b.createdAt}`.localeCompare(`${a.watchedOn}${a.createdAt}`))[0],
         }))
         .filter((x) => x.entry)
     : [];
-  const onList = Boolean(data && data.watchlist.some((w) => w.tmdbId === film.tmdbId));
+  const onList = Boolean(data && data.watchlist.some((w) => filmKey(w) === filmKey(film)));
   const backdrop = info && backdropUrl(info.backdrop);
 
   async function queue() {
@@ -55,11 +56,17 @@ function FilmDetails({ film }) {
         <Poster path={film.poster} title={film.title} className="film-poster" />
         <div className="grow">
           <h3 className="film-title">
-            {film.title} {film.year && <span className="muted">({film.year})</span>}
+            {film.title} {film.year && <span className="muted">({film.year})</span>} <KindBadge film={stored} />
           </h3>
           {info?.tagline && <p className="muted italic">{info.tagline}</p>}
           <p className="muted">
-            {[info?.directors?.length ? `Directed by ${info.directors.join(", ")}` : null, stored.runtime ? `${stored.runtime} min` : null, stored.genres.join(", ") || null]
+            {[
+              info?.directors?.length ? `Directed by ${info.directors.join(", ")}` : null,
+              info?.creators?.length ? `Created by ${info.creators.join(", ")}` : null,
+              info?.seasons ? `${info.seasons} season${info.seasons === 1 ? "" : "s"}` : null,
+              stored.runtime ? `${stored.runtime} min` : null,
+              stored.genres.join(", ") || null,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </p>
@@ -72,7 +79,11 @@ function FilmDetails({ film }) {
         <ul className="take-list">
           {logs.map(({ profile, entry }) => (
             <li key={profile}>
-              <strong>{profile}</strong> <Stars value={entry.rating} /> <span className="muted">{fmtDay(entry.watchedOn)}</span>
+              <strong>{profile}</strong> <Stars value={entry.rating} />{" "}
+              <span className="muted">
+                {seasonLabel(entry) && `${seasonLabel(entry)} · `}
+                {fmtDay(entry.watchedOn)}
+              </span>
               {entry.review && <p className="review">{entry.review}</p>}
             </li>
           ))}
@@ -114,7 +125,7 @@ export default function ModalHost() {
   const { modal, closeModal } = useStore();
   if (!modal) return null;
   const { type, props } = modal;
-  const key = `${type}-${props.entry?.id || props.night?.id || props.film?.tmdbId || "new"}`;
+  const key = `${type}-${props.entry?.id || props.night?.id || (props.film ? filmKey(props.film) : "new")}`;
 
   if (type === "queue") {
     return (
@@ -126,7 +137,7 @@ export default function ModalHost() {
 
   if (type === "log") {
     return (
-      <Modal key={key} title={props.entry ? "Edit your log" : "Log a film"} onClose={closeModal}>
+      <Modal key={key} title={props.entry ? "Edit your log" : "Log something"} onClose={closeModal}>
         <LogForm {...props} onClose={closeModal} />
       </Modal>
     );
@@ -147,7 +158,7 @@ export default function ModalHost() {
   }
   if (type === "film") {
     return (
-      <Modal key={key} title="Film" onClose={closeModal} wide>
+      <Modal key={key} title="Details" onClose={closeModal} wide>
         <FilmDetails film={props.film} />
       </Modal>
     );

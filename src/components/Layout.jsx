@@ -27,7 +27,7 @@ export function Header() {
         ))}
       </nav>
       <button type="button" className="btn small" onClick={() => openModal("log")}>
-        Log a film
+        Log something
       </button>
       <details className="who">
         <summary>{me}</summary>

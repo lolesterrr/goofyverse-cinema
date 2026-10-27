@@ -1,5 +1,7 @@
 // Pure helpers: taste match between two people and "year in review" stats.
 
+import { filmKey, kindOf } from "./tmdb.js";
+
 const stamp = (e) => `${e.watchedOn}|${e.createdAt || ""}`;
 
 // The latest rated log for each film (a rewatch replaces the older rating).
@@ -7,8 +9,9 @@ export function ratedLatest(entries = []) {
   const best = new Map();
   for (const e of entries) {
     if (e.rating == null) continue;
-    const cur = best.get(e.tmdbId);
-    if (!cur || stamp(e) >= stamp(cur)) best.set(e.tmdbId, e);
+    const key = filmKey(e);
+    const cur = best.get(key);
+    if (!cur || stamp(e) >= stamp(cur)) best.set(key, e);
   }
   return best;
 }
@@ -17,11 +20,14 @@ export function tasteMatch(a = [], b = []) {
   const A = ratedLatest(a);
   const B = ratedLatest(b);
   const shared = [];
-  for (const [id, ea] of A) {
-    const eb = B.get(id);
+  for (const [key, ea] of A) {
+    const eb = B.get(key);
     if (!eb) continue;
     shared.push({
-      tmdbId: id,
+      key,
+      tmdbId: ea.tmdbId,
+      media: ea.media || "movie",
+      kind: kindOf(ea),
       title: ea.title,
       year: ea.year,
       poster: ea.poster || eb.poster || null,
@@ -49,6 +55,12 @@ export function yearsIn(lists, fallback = new Date().getFullYear()) {
   return [...years].sort((a, b) => b - a);
 }
 
+function countKinds(entries) {
+  const seen = { movie: new Set(), series: new Set(), anime: new Set() };
+  for (const e of entries) seen[kindOf(e)].add(filmKey(e));
+  return { movie: seen.movie.size, series: seen.series.size, anime: seen.anime.size };
+}
+
 export function profileStats(entries = [], year) {
   const inYear = entries.filter((e) => e.watchedOn.startsWith(String(year)));
   const rated = inYear.filter((e) => e.rating != null);
@@ -59,7 +71,8 @@ export function profileStats(entries = [], year) {
   return {
     year,
     logs: inYear.length,
-    films: new Set(inYear.map((e) => e.tmdbId)).size,
+    films: new Set(inYear.map(filmKey)).size,
+    byKind: countKinds(inYear),
     avg: rated.length ? Math.round((rated.reduce((s, e) => s + e.rating, 0) / rated.length) * 100) / 100 : null,
     hours: Math.round(inYear.reduce((s, e) => s + (e.runtime || 0), 0) / 60),
     together: inYear.filter((e) => e.together).length,
@@ -77,10 +90,11 @@ export function groupByFilm(diary = {}) {
   const groups = new Map();
   for (const [profile, entries] of Object.entries(diary)) {
     for (const e of entries) {
-      let g = groups.get(e.tmdbId);
+      const key = filmKey(e);
+      let g = groups.get(key);
       if (!g) {
-        g = { tmdbId: e.tmdbId, title: e.title, year: e.year, poster: e.poster, newest: stamp(e), byProfile: {} };
-        groups.set(e.tmdbId, g);
+        g = { key, tmdbId: e.tmdbId, media: e.media || "movie", kind: kindOf(e), title: e.title, year: e.year, poster: e.poster, newest: stamp(e), byProfile: {} };
+        groups.set(key, g);
       }
       if (stamp(e) > g.newest) g.newest = stamp(e);
       const cur = g.byProfile[profile];

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tasteMatch, profileStats, groupByFilm, ratedLatest, yearsIn } from "../src/lib/taste.js";
 import { countdown, defaultNightInput, toLocalInput, fromLocalInput, fmtDay, todayStr } from "../src/lib/dates.js";
-import { fallbackGradient, posterUrl, toFilm } from "../src/lib/tmdb.js";
+import { fallbackGradient, filmKey, kindOf, posterUrl, toFilm } from "../src/lib/tmdb.js";
 
 const log = (tmdbId, title, rating, watchedOn, extra = {}) => ({
   id: `${tmdbId}-${watchedOn}`, tmdbId, title, year: 2000, poster: null, genres: [], runtime: 100, rating, watchedOn, createdAt: `${watchedOn}T10:00:00Z`, ...extra,
@@ -33,7 +33,7 @@ describe("taste match", () => {
 
   it("ignores unrated logs and uses the latest rating on a rewatch", () => {
     const latest = ratedLatest([log(1, "A", 2, "2026-01-01"), log(1, "A", 4.5, "2026-06-01"), log(1, "A", null, "2026-09-01")]);
-    expect(latest.get(1).rating).toBe(4.5);
+    expect(latest.get("movie:1").rating).toBe(4.5);
   });
 });
 
@@ -114,6 +114,41 @@ describe("tmdb helpers", () => {
     expect(fallbackGradient("Paprika")).not.toBe(fallbackGradient("Heat"));
   });
   it("keeps only the stored film fields", () => {
-    expect(toFilm({ tmdbId: 1, title: "X", overview: "long", score: 7 })).toEqual({ tmdbId: 1, title: "X", year: null, poster: null, genres: [], runtime: null });
+    expect(toFilm({ tmdbId: 1, title: "X", overview: "long", score: 7 })).toEqual({ tmdbId: 1, media: "movie", kind: "movie", title: "X", year: null, poster: null, genres: [], runtime: null });
+  });
+  it("tells films, series and anime apart, and never mixes a film with a show of the same number", () => {
+    expect(filmKey({ tmdbId: 5 })).toBe("movie:5");
+    expect(filmKey({ tmdbId: 5, media: "tv" })).toBe("tv:5");
+    expect(kindOf({ tmdbId: 5, media: "tv" })).toBe("series");
+    expect(kindOf({ tmdbId: 5, media: "tv", kind: "anime" })).toBe("anime");
+    expect(kindOf({ tmdbId: 5, media: "movie", kind: "anime" })).toBe("anime");
+  });
+});
+
+describe("series and anime", () => {
+  const show = (tmdbId, title, rating, watchedOn, extra = {}) => ({ ...log(tmdbId, title, rating, watchedOn), media: "tv", kind: "series", runtime: null, ...extra });
+
+  it("keeps a film and a show with the same TMDB number apart", () => {
+    const t = tasteMatch([log(7, "Film", 4, "2026-01-01")], [show(7, "Show", 2, "2026-01-02")]);
+    expect(t.total).toBe(0);
+    const groups = groupByFilm({ Kensss: [log(7, "Film", 4, "2026-01-01"), show(7, "Show", 2, "2026-01-02")], Goof: [] });
+    expect(groups).toHaveLength(2);
+    expect(new Set(groups.map((g) => g.key)).size).toBe(2);
+  });
+
+  it("matches a show across two people and carries its kind", () => {
+    const t = tasteMatch([show(9, "Bebop", 5, "2026-01-01", { kind: "anime" })], [show(9, "Bebop", 4.5, "2026-02-01", { kind: "anime" })]);
+    expect(t.total).toBe(1);
+    expect(t.shared[0]).toMatchObject({ key: "tv:9", media: "tv", kind: "anime" });
+  });
+
+  it("counts each kind once per title in the year in review, and adds no runtime for shows", () => {
+    const s = profileStats(
+      [log(1, "Film", 4, "2026-01-01"), show(2, "Show", 5, "2026-02-01", { season: 1 }), show(2, "Show", 5, "2026-03-01", { season: 2 }), show(3, "Bebop", 4, "2026-04-01", { kind: "anime" })],
+      2026,
+    );
+    expect(s.films).toBe(3);
+    expect(s.byKind).toEqual({ movie: 1, series: 1, anime: 1 });
+    expect(s.hours).toBe(Math.round(100 / 60));
   });
 });

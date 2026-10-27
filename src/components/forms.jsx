@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
-import { toFilm } from "../lib/tmdb.js";
+import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import { defaultNightInput, fromLocalInput, todayStr, toLocalInput } from "../lib/dates.js";
 import FilmPicker from "./FilmPicker.jsx";
+import KindBadge from "./KindBadge.jsx";
 import Poster from "./Poster.jsx";
 import Pierre from "./Pierre.jsx";
 import { StarInput } from "./Stars.jsx";
@@ -13,11 +14,11 @@ function FilmChip({ film, onChange }) {
     <div className="film-chip">
       <Poster path={film.poster} title={film.title} size="w92" className="thumb" />
       <div className="grow">
-        <strong>{film.title}</strong> {film.year && <span className="muted">({film.year})</span>}
+        <strong>{film.title}</strong> {film.year && <span className="muted">({film.year})</span>} <KindBadge film={film} />
       </div>
       {onChange && (
         <button type="button" className="btn ghost small" onClick={onChange}>
-          Change film
+          Change title
         </button>
       )}
     </div>
@@ -60,6 +61,8 @@ export function LogForm({ entry, film: filmProp, together: togetherProp, onClose
   const [watchedOn, setWatchedOn] = useState(entry?.watchedOn || todayStr());
   const [together, setTogether] = useState(entry ? Boolean(entry.together) : Boolean(togetherProp));
   const [rewatch, setRewatch] = useState(Boolean(entry?.rewatch));
+  const [kind, setKind] = useState(entry ? kindOf(entry) : null);
+  const [season, setSeason] = useState(entry?.season ? String(entry.season) : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -68,12 +71,16 @@ export function LogForm({ entry, film: filmProp, together: togetherProp, onClose
       <FilmPicker
         onPick={(f) => {
           setFilm(f);
+          setKind(kindOf(f));
           setPicking(false);
         }}
         onCancel={film ? () => setPicking(false) : onClose}
       />
     );
   }
+
+  const isShow = film.media === "tv";
+  const chosenKind = kind || kindOf(film);
 
   async function submit(e) {
     e.preventDefault();
@@ -83,6 +90,8 @@ export function LogForm({ entry, film: filmProp, together: togetherProp, onClose
       await saveDiary({
         ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}),
         ...film,
+        kind: chosenKind,
+        season: isShow && season ? Number(season) : null,
         rating,
         review,
         watchedOn,
@@ -110,6 +119,33 @@ export function LogForm({ entry, film: filmProp, together: togetherProp, onClose
   return (
     <form className="form" onSubmit={submit}>
       <FilmChip film={film} onChange={entry ? null : () => setPicking(true)} />
+      <div className="row wrap">
+        <div className="field">
+          <span className="label">Counts as</span>
+          <div className="chips" role="group" aria-label="Counts as">
+            {KINDS.filter((k) => isShow || k.id !== "series").map((k) => (
+              <button key={k.id} type="button" className="chip" aria-pressed={chosenKind === k.id} onClick={() => setKind(k.id)}>
+                {k.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {isShow && (
+          <label className="field">
+            <span className="label">Season (optional)</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={100}
+              step={1}
+              value={season}
+              onChange={(e) => setSeason(e.target.value)}
+              placeholder="Whole show"
+            />
+          </label>
+        )}
+      </div>
       <div className="field">
         <span className="label">Your rating</span>
         <StarInput value={rating} onChange={setRating} label="Your rating" />
@@ -231,7 +267,7 @@ export function NightForm({ night, film: filmProp, onClose }) {
 
 /* ---------- the jazz shelf ---------- */
 
-export const JAZZ_CATEGORIES = ["album", "track", "anime", "game", "show", "book", "food", "other"];
+export const JAZZ_CATEGORIES = ["album", "track", "game", "book", "podcast", "food", "other"];
 
 export function JazzForm({ entry, onClose }) {
   const { saveJazz, removeJazz } = useStore();

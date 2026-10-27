@@ -89,4 +89,7 @@ export const api = {
   search: (q) => request("GET", `/api/tmdb/search?q=${enc(q)}`),
   trending: () => request("GET", "/api/tmdb/trending"),
   movie: (id) => request("GET", `/api/tmdb/movie/${enc(id)}`),
+  tv: (id) => request("GET", `/api/tmdb/tv/${enc(id)}`),
+  // full details for a search hit, whichever kind of thing it is
+  details: (film) => request("GET", `/api/tmdb/${film.media === "tv" ? "tv" : "movie"}/${enc(film.tmdbId)}`),
 };

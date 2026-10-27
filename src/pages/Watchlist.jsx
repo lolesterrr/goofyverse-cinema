@@ -3,7 +3,7 @@ import { useStore } from "../store.jsx";
 import { countdown } from "../lib/dates.js";
 import { explain } from "../lib/errors.js";
 import { useNow } from "../lib/hooks.js";
-import { toFilm } from "../lib/tmdb.js";
+import { KINDS, filmKey, kindOf, toFilm } from "../lib/tmdb.js";
 import Loaded from "../components/Loaded.jsx";
 import { Empty } from "../components/Layout.jsx";
 import Ticket from "../components/Ticket.jsx";
@@ -12,11 +12,12 @@ function WatchlistBody({ data }) {
   const { me, openModal, removeFromWatchlist, say } = useStore();
   const now = useNow();
   const [onlyUnseen, setOnlyUnseen] = useState(false);
+  const [kind, setKind] = useState("all");
   const profiles = data.profiles;
 
-  const seen = (p, item) => (data.diary[p] || []).some((e) => e.tmdbId === item.tmdbId);
+  const seen = (p, item) => (data.diary[p] || []).some((e) => filmKey(e) === filmKey(item));
   const upcoming = data.nights.filter((n) => n.status !== "done" && countdown(n.when, now).state !== "past");
-  const items = data.watchlist.slice().reverse().filter((i) => !onlyUnseen || !seen(me, i));
+  const items = data.watchlist.slice().reverse().filter((i) => (!onlyUnseen || !seen(me, i)) && (kind === "all" || kindOf(i) === kind));
 
   async function remove(item) {
     if (!window.confirm(`Take ${item.title} off the queue?`)) return;
@@ -32,7 +33,7 @@ function WatchlistBody({ data }) {
       <div className="page-head">
         <h1>Watchlist</h1>
         <button type="button" className="btn" onClick={() => openModal("queue")}>
-          Add a film
+          Add to the queue
         </button>
       </div>
       <p className="muted">One queue for all of you. Anyone can add, plan a night or take something off.</p>
@@ -46,20 +47,30 @@ function WatchlistBody({ data }) {
             Not seen by me
           </button>
         </div>
+        <div className="chips" role="group" aria-label="Show only">
+          <button type="button" className="chip" aria-pressed={kind === "all"} onClick={() => setKind("all")}>
+            All kinds
+          </button>
+          {KINDS.map((k) => (
+            <button key={k.id} type="button" className="chip" aria-pressed={kind === k.id} onClick={() => setKind(k.id)}>
+              {k.plural}
+            </button>
+          ))}
+        </div>
       </div>
 
       {data.watchlist.length === 0 ? (
         <Empty
           action={
             <button type="button" className="btn" onClick={() => openModal("queue")}>
-              Add the first film
+              Add the first title
             </button>
           }
         >
           Nothing queued. What should you two watch next?
         </Empty>
       ) : items.length === 0 ? (
-        <Empty anim="happy">You've seen everything in the queue. Impressive.</Empty>
+        <Empty anim="happy">Nothing in the queue matches. Or you've seen it all. Impressive.</Empty>
       ) : (
         <div className="ticket-grid">
           {items.map((item) => (
@@ -67,7 +78,7 @@ function WatchlistBody({ data }) {
               key={item.id}
               item={item}
               seenBy={profiles.filter((p) => seen(p, item))}
-              night={upcoming.find((n) => n.tmdbId === item.tmdbId) || null}
+              night={upcoming.find((n) => filmKey(n) === filmKey(item)) || null}
               actions={
                 <div className="row wrap">
                   <button type="button" className="btn ghost small" onClick={() => openModal("night", { film: toFilm(item) })}>

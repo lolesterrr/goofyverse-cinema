@@ -1,6 +1,7 @@
 import { useStore } from "../store.jsx";
 import { fmtWhen } from "../lib/dates.js";
 import { toFilm } from "../lib/tmdb.js";
+import KindBadge from "./KindBadge.jsx";
 import Poster from "./Poster.jsx";
 
 // A watchlist film drawn as a ticket stub.
@@ -14,6 +15,7 @@ export default function Ticket({ item, seenBy = [], night = null, actions = null
           <span className="ticket-text">
             <strong className="display">{item.title}</strong>
             {item.year && <span className="muted">{item.year}</span>}
+            <KindBadge film={item} />
           </span>
         </button>
         <p className="muted small-text">

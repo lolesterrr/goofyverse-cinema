@@ -6,10 +6,10 @@ Live at <https://lolesterrr.github.io/goofyverse-cinema/> once you finish the se
 
 ## What's in it
 
-- **Diary**: log a film with half-star ratings, a review, the date, and whether you watched it together. Everyone's takes on the same film sit side by side.
+- **Diary**: log a film, a series or an anime with half-star ratings, a review, the date, and whether you watched it together. A show is logged as a whole, with an optional season number. Everyone's takes on the same title sit side by side, and Films / Series / Anime chips filter the Diary and the Watchlist.
 - **Watchlist**: one shared queue, drawn as ticket stubs. Anyone can add, plan a night or remove.
 - **Movie night**: pick a film, a date and a place. Both of you answer In, Maybe or Out, and there's a countdown.
-- **The Jazz shelf**: anything that isn't a film. Albums, anime, games, books, snacks. Each entry has a category, a rating and a review.
+- **The Jazz shelf**: anything that isn't a film, series or anime. Albums, games, books, snacks. Each entry has a category, a rating and a review.
 - **Us**: taste match (how often you agree, and the biggest fight), a year in review for each person, and Pierre's complaint desk for anything rated two stars or less.
 - **Pierre**: reacts when you rate (happy at 4.5 stars and up, sad at 1.5 and below), holds your tickets and eats popcorn on movie nights. Click him in the sign in screen if you want to pet him.
 
@@ -31,7 +31,7 @@ GitHub Pages only serves files, so the worker is the small backend that remember
 
 ### 1. Get a TMDB key
 
-Film search and posters come from [TMDB](https://www.themoviedb.org/), which is free for personal projects.
+Film, series and anime search and posters all come from [TMDB](https://www.themoviedb.org/), which is free for personal projects. There is no separate anime source: a show or film counts as anime when TMDB files it under Animation and its original language is Japanese. You can override that with the "Counts as" chips when you log something.
 
 1. Make a free account, then go to Settings > API and request a key (pick the personal or non-commercial option).
 2. Copy the **API Read Access Token** (the long one). You'll give it to the worker in step 2.

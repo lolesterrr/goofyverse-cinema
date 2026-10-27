@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useStore } from "../store.jsx";
 import { fmtDay } from "../lib/dates.js";
 import { groupByFilm, yearsIn } from "../lib/taste.js";
-import { toFilm } from "../lib/tmdb.js";
+import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import Loaded from "../components/Loaded.jsx";
 import { Empty } from "../components/Layout.jsx";
+import KindBadge, { seasonLabel } from "../components/KindBadge.jsx";
 import Poster from "../components/Poster.jsx";
 import Programme from "../components/Programme.jsx";
 import { Stars } from "../components/Stars.jsx";
@@ -24,10 +25,10 @@ function EntryRow({ entry, mine }) {
       <div className="grow">
         <div>
           <strong className="display">{entry.title}</strong> {entry.year && <span className="muted">{entry.year}</span>}{" "}
-          <Stars value={entry.rating} />
+          <KindBadge film={entry} /> <Stars value={entry.rating} />
         </div>
         <div className="chips">
-          <span className="muted small-text">{fmtDay(entry.watchedOn)}</span>
+          <span className="muted small-text">{[seasonLabel(entry), fmtDay(entry.watchedOn)].filter(Boolean).join(" · ")}</span>
           {entry.together && <span className="badge gold-badge">Together</span>}
           {entry.rewatch && <span className="badge">Rewatch</span>}
         </div>
@@ -48,15 +49,17 @@ function DiaryBody({ data }) {
   const [who, setWho] = useState("all");
   const [year, setYear] = useState("all");
   const [q, setQ] = useState("");
+  const [kind, setKind] = useState("all");
   const years = useMemo(() => yearsIn(Object.values(data.diary)), [data.diary]);
   const term = q.trim().toLowerCase();
 
-  const keep = (e) => (year === "all" || e.watchedOn.startsWith(year)) && (!term || e.title.toLowerCase().includes(term));
+  const keep = (e) =>
+    (year === "all" || e.watchedOn.startsWith(year)) && (kind === "all" || kindOf(e) === kind) && (!term || e.title.toLowerCase().includes(term));
 
   const filteredDiary = useMemo(
     () => Object.fromEntries(Object.entries(data.diary).map(([p, list]) => [p, list.filter(keep)])),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.diary, year, term],
+    [data.diary, year, term, kind],
   );
 
   const everyone = who === "all";
@@ -79,7 +82,7 @@ function DiaryBody({ data }) {
       <div className="page-head">
         <h1>Diary</h1>
         <button type="button" className="btn" onClick={() => openModal("log")}>
-          Log a film
+          Log something
         </button>
       </div>
 
@@ -92,6 +95,16 @@ function DiaryBody({ data }) {
             <button key={p} type="button" className="chip" aria-pressed={who === p} onClick={() => setWho(p)}>
               {p}
               {p === me ? " (you)" : ""}
+            </button>
+          ))}
+        </div>
+        <div className="chips" role="group" aria-label="Show only">
+          <button type="button" className="chip" aria-pressed={kind === "all"} onClick={() => setKind("all")}>
+            All kinds
+          </button>
+          {KINDS.map((k) => (
+            <button key={k.id} type="button" className="chip" aria-pressed={kind === k.id} onClick={() => setKind(k.id)}>
+              {k.plural}
             </button>
           ))}
         </div>

@@ -24,7 +24,7 @@ function JazzBody({ data }) {
           Add to the shelf
         </button>
       </div>
-      <p className="muted">Everything that isn't a film: albums, anime, games, books, snacks. Rate it, say something, put it on the shelf.</p>
+      <p className="muted">Everything that isn't a film, series or anime: albums, games, books, snacks. Rate it, say something, put it on the shelf.</p>
 
       {all.length > 0 && (
         <div className="filters">

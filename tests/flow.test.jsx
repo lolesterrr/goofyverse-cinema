@@ -20,11 +20,14 @@ class FakeKV {
 const PASS = "open sesame";
 const MANIFEST = readFileSync(join(process.cwd(), "public/pierre/pierre.json"), "utf8");
 
-const WHIPLASH = { id: 244786, title: "Whiplash", release_date: "2014-10-10", poster_path: "/w.jpg", overview: "A young drummer meets a terrifying teacher.", vote_average: 8.4 };
+const WHIPLASH = { media_type: "movie", genre_ids: [18, 10402], original_language: "en", id: 244786, title: "Whiplash", release_date: "2014-10-10", poster_path: "/w.jpg", overview: "A young drummer meets a terrifying teacher.", vote_average: 8.4 };
 const DETAIL = {
   ...WHIPLASH, backdrop_path: "/b.jpg", tagline: "", runtime: 106,
   genres: [{ name: "Drama" }, { name: "Music" }], credits: { crew: [{ job: "Director", name: "Damien Chazelle" }] },
 };
+
+const BEBOP = { media_type: "tv", id: 30991, name: "Cowboy Bebop", first_air_date: "1998-10-24", poster_path: "/bb.jpg", overview: "Bounty hunters in space.", vote_average: 8.7, genre_ids: [16, 10759], original_language: "ja" };
+const BEBOP_DETAIL = { ...BEBOP, backdrop_path: "/bbb.jpg", tagline: "", episode_run_time: [24], number_of_seasons: 1, number_of_episodes: 26, genres: [{ name: "Animation" }], created_by: [{ name: "Hajime Yatate" }] };
 
 let env;
 let realFetch;
@@ -35,7 +38,8 @@ function installFetch() {
     if (url.pathname.endsWith("/pierre/pierre.json")) return new Response(MANIFEST, { status: 200 });
     if (url.hostname === "api.themoviedb.org") {
       if (url.pathname.startsWith("/3/movie/")) return new Response(JSON.stringify(DETAIL), { status: 200 });
-      return new Response(JSON.stringify({ results: [WHIPLASH] }), { status: 200 });
+      if (url.pathname.startsWith("/3/tv/")) return new Response(JSON.stringify(BEBOP_DETAIL), { status: 200 });
+      return new Response(JSON.stringify({ results: [WHIPLASH, BEBOP] }), { status: 200 });
     }
     if (url.hostname === "worker.test") {
       const headers = { ...(init.headers || {}), origin: "https://lolesterrr.github.io" };
@@ -107,7 +111,7 @@ describe("the whole app against the real worker", () => {
     await signInAs(user, "Kensss");
 
     // the header button comes first; the empty-state hero has one too
-    await user.click(screen.getAllByRole("button", { name: "Log a film" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Log something" })[0]);
     const dialog = await screen.findByRole("dialog");
     await user.click(await within(dialog).findByRole("button", { name: /whiplash/i }));
     await user.click(await within(dialog).findByRole("button", { name: "4.5 stars" }));
@@ -126,13 +130,38 @@ describe("the whole app against the real worker", () => {
     expect(saved[0]).toMatchObject({ tmdbId: 244786, rating: 4.5, genres: ["Drama", "Music"], runtime: 106 });
   });
 
+  it("logs an anime series with a season and files it under Anime", async () => {
+    const user = userEvent.setup();
+    mount();
+    await signInAs(user, "Kensss");
+
+    await user.click(screen.getAllByRole("button", { name: "Log something" })[0]);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(await within(dialog).findByRole("button", { name: /cowboy bebop/i }));
+    expect(within(dialog).getByRole("button", { name: "Anime", pressed: true })).toBeTruthy(); // Animation + Japanese
+    await user.type(within(dialog).getByLabelText(/season/i), "2");
+    await user.click(await within(dialog).findByRole("button", { name: "5 stars" }));
+    await user.click(within(dialog).getByRole("button", { name: "Log it" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    const saved = JSON.parse(env.GOOFY_KV.map.get("u:kensss:diary"));
+    expect(saved[0]).toMatchObject({ tmdbId: 30991, media: "tv", kind: "anime", season: 2, rating: 5, runtime: null });
+
+    await user.click(screen.getByRole("link", { name: "Diary" }));
+    expect(await screen.findByText(/Season 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Films" }));
+    expect(await screen.findByText("Nothing matches that.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Anime" }));
+    expect(await screen.findByText("Cowboy Bebop")).toBeTruthy();
+  });
+
   it("queues a film, plans a movie night from it and RSVPs", async () => {
     const user = userEvent.setup();
     mount();
     await signInAs(user, "Goof");
 
     await user.click(screen.getByRole("link", { name: "Watchlist" }));
-    await user.click(await screen.findByRole("button", { name: "Add a film" }));
+    await user.click(await screen.findByRole("button", { name: "Add to the queue" }));
     const add = await screen.findByRole("dialog");
     await user.click(await within(add).findByRole("button", { name: /whiplash/i }));
     expect(await screen.findByText("Added to the queue.")).toBeTruthy();

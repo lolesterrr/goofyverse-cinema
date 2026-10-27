@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useStore } from "../store.jsx";
 import { ratedLatest, profileStats, tasteMatch, yearsIn } from "../lib/taste.js";
-import { toFilm } from "../lib/tmdb.js";
+import { filmKey, toFilm } from "../lib/tmdb.js";
 import Loaded from "../components/Loaded.jsx";
 import { Empty } from "../components/Layout.jsx";
 import Pierre from "../components/Pierre.jsx";
+import KindBadge from "../components/KindBadge.jsx";
 import Poster from "../components/Poster.jsx";
 import { Stars } from "../components/Stars.jsx";
 
@@ -25,11 +26,14 @@ function StatsColumn({ name, stats }) {
     <div className="panel stats">
       <h3>{name}</h3>
       <dl className="stat-grid">
-        <div><dt>Films</dt><dd>{stats.films}</dd></div>
+        <div><dt>Titles</dt><dd>{stats.films}</dd></div>
         <div><dt>Logs</dt><dd>{stats.logs}</dd></div>
         <div><dt>Average</dt><dd>{stats.avg == null ? "–" : stats.avg}</dd></div>
         <div><dt>Hours</dt><dd>{stats.hours}</dd></div>
       </dl>
+      <p className="small-text muted">
+        {stats.byKind.movie} film{stats.byKind.movie === 1 ? "" : "s"} · {stats.byKind.series} series · {stats.byKind.anime} anime
+      </p>
       <p className="eyebrow">Ratings</p>
       <Histogram stats={stats} />
       {stats.topGenres.length > 0 && (
@@ -70,7 +74,7 @@ function UsBody({ data }) {
     Object.values(data.diary)
       .flat()
       .filter((e) => e.together && e.watchedOn.startsWith(String(year)))
-      .map((e) => e.tmdbId),
+      .map(filmKey),
   ).size;
 
   return (
@@ -104,7 +108,7 @@ function UsBody({ data }) {
           <Empty anim="think">Pick two different people.</Empty>
         ) : taste.total === 0 ? (
           <Empty anim="think">
-            {a} and {b} haven't rated the same film yet. Rate one you both saw and I'll do the maths.
+            {a} and {b} haven't rated the same title yet. Rate one you both saw and I'll do the maths.
           </Empty>
         ) : (
           <>
@@ -116,7 +120,7 @@ function UsBody({ data }) {
                   <div style={{ width: `${taste.percent}%` }} />
                 </div>
                 <p>
-                  {a} and {b} agree, within half a star, on <strong>{taste.agreeCount}</strong> of <strong>{taste.total}</strong> shared films.
+                  {a} and {b} agree, within half a star, on <strong>{taste.agreeCount}</strong> of <strong>{taste.total}</strong> shared titles.
                 </p>
                 {taste.fight && (
                   <p className="muted">
@@ -132,11 +136,11 @@ function UsBody({ data }) {
               </thead>
               <tbody>
                 {taste.shared.map((f) => (
-                  <tr key={f.tmdbId}>
+                  <tr key={f.key}>
                     <td>
                       <button type="button" className="prog-film" onClick={() => openModal("film", { film: toFilm(f) })}>
                         <Poster path={f.poster} title={f.title} size="w92" className="thumb small-thumb" />
-                        <span>{f.title} {f.year && <span className="muted">{f.year}</span>}</span>
+                        <span>{f.title} {f.year && <span className="muted">{f.year}</span>} <KindBadge film={f} /></span>
                       </button>
                     </td>
                     <td><Stars value={f.a} /></td>
@@ -161,7 +165,7 @@ function UsBody({ data }) {
           </label>
         </div>
         <p className="muted">
-          {togetherFilms === 0 ? "No films watched together in " : `${togetherFilms} film${togetherFilms === 1 ? "" : "s"} watched together in `}
+          {togetherFilms === 0 ? "Nothing watched together in " : `${togetherFilms} title${togetherFilms === 1 ? "" : "s"} watched together in `}
           {year}.
         </p>
         <div className="stats-grid">

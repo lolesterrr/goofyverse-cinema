@@ -24,13 +24,14 @@ const log = (id, f, rating, watchedOn, extra = {}) => ({
 const whiplash = film(1, "Whiplash", 2014);
 const paprika = film(2, "Paprika", 2006);
 const heat = film(3, "Heat", 1995);
+const bebop = { ...film(30991, "Cowboy Bebop", 1998), media: "tv", kind: "anime", runtime: null };
 const soon = new Date(Date.now() + 3 * 86400000).toISOString();
 
 const sample = {
   me: "Kensss",
   profiles: ["Kensss", "Goof"],
   diary: {
-    Kensss: [log("a1", whiplash, 4.5, "2026-10-20"), log("a2", paprika, 1.5, "2026-10-22", { together: false })],
+    Kensss: [log("a1", whiplash, 4.5, "2026-10-20"), log("a2", paprika, 1.5, "2026-10-22", { together: false }), log("a3", bebop, 5, "2026-10-23", { season: 2 })],
     Goof: [log("b1", whiplash, 4, "2026-10-20"), log("b2", heat, null, "2026-09-01")],
   },
   jazz: {
@@ -74,6 +75,8 @@ describe("pages with data", () => {
     expect(html).toContain("The programme");
     expect(html).toContain("Whiplash");
     expect(html).toContain("Kind of Blue");
+    expect(html).toContain("Cowboy Bebop");
+    expect(html).toContain("Season 2");
     expect(html).toContain("Taste match");
     expect(html).toContain("%");
   });
@@ -108,7 +111,7 @@ describe("empty states", () => {
     expect(render(<Nights />, empty)).toContain("No night on the calendar");
     expect(render(<Jazz />, empty)).toContain("The shelf is bare");
     const us = render(<Us />, empty);
-    expect(us).toContain("haven&#x27;t rated the same film yet");
+    expect(us).toContain("haven&#x27;t rated the same title yet");
     expect(us).toContain("No complaints");
   });
 
@@ -128,7 +131,7 @@ describe("gate, layout and dialogs", () => {
   it("renders the header, footer and a toast", () => {
     const header = render(<Header />);
     expect(header).toContain("Goofyverse Cinema");
-    expect(header).toContain("Log a film");
+    expect(header).toContain("Log something");
     expect(render(<Footer />)).toContain("TMDB");
     expect(render(<Toast />, sample, { toast: { text: "Magnifique.", mood: "happy", key: 1 } })).toContain("Magnifique.");
   });
@@ -141,9 +144,11 @@ describe("gate, layout and dialogs", () => {
     expect(open("night", { night: sample.nights[0] })).toContain("Cancel night");
     expect(open("jazz")).toContain("Put it on the shelf");
     expect(open("jazz", { entry: sample.jazz.Kensss[0] })).toContain("Delete entry");
-    expect(open("queue")).toContain("Search for a film");
+    expect(open("queue")).toContain("Search for a film, series or anime");
     expect(open("film", { film: whiplash })).toContain("Log it");
-    expect(open("log")).toContain("Search for a film");
+    expect(open("log")).toContain("Search for a film, series or anime");
+    expect(open("log", { film: bebop })).toContain("Season (optional)");
+    expect(open("log", { film: whiplash })).not.toContain("Season (optional)");
   });
 
   it("renders stars, the star input and Pierre", () => {

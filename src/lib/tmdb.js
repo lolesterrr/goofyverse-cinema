@@ -13,10 +13,23 @@ export function fallbackGradient(title = "") {
   return `linear-gradient(160deg, hsl(${a} 45% 38%), hsl(${b} 50% 16%))`;
 }
 
-// The shape we store for a film, from either a search hit or full details.
+// A film and a show can share a TMDB number, so identity is media type plus number.
+export const filmKey = (f) => `${f.media || "movie"}:${f.tmdbId}`;
+
+export const KINDS = [
+  { id: "movie", label: "Film", plural: "Films" },
+  { id: "series", label: "Series", plural: "Series" },
+  { id: "anime", label: "Anime", plural: "Anime" },
+];
+export const kindOf = (f) => f.kind || (f.media === "tv" ? "series" : "movie");
+export const kindLabel = (f) => KINDS.find((k) => k.id === kindOf(f)).label;
+
+// The shape we store for a title, from either a search hit or full details.
 export function toFilm(src) {
   return {
     tmdbId: src.tmdbId,
+    media: src.media || "movie",
+    kind: kindOf(src),
     title: src.title,
     year: src.year ?? null,
     poster: src.poster ?? null,

@@ -1,7 +1,7 @@
 import { useStore } from "../store.jsx";
 import { Stars } from "./Stars.jsx";
 
-const HUES = { album: 350, track: 38, anime: 210, game: 140, show: 280, book: 20, food: 60, other: 190 };
+const HUES = { album: 350, track: 38, game: 140, podcast: 210, book: 20, food: 60, other: 190 };
 
 function hueFor(category) {
   if (HUES[category] !== undefined) return HUES[category];
