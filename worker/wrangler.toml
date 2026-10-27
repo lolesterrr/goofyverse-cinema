@@ -1,0 +1,20 @@
+name = "goofyverse-cinema"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Everyone who can sign in. To add a friend later, add their name here and redeploy.
+PROFILES = "Kensss,Goof"
+# The sites allowed to call this worker from a browser.
+ALLOWED_ORIGINS = "https://lolesterrr.github.io,http://localhost:5173"
+
+# Create the namespace once with:  npx wrangler kv namespace create GOOFY_KV
+# then paste the id it prints below.
+[[kv_namespaces]]
+binding = "GOOFY_KV"
+id = "PASTE_YOUR_KV_NAMESPACE_ID"
+
+# Secrets are NOT stored in this file. Set them with:
+#   npx wrangler secret put PASSPHRASE
+#   npx wrangler secret put SIGNING_KEY
+#   npx wrangler secret put TMDB_TOKEN
