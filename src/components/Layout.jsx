@@ -74,10 +74,10 @@ export function Toast() {
 }
 
 // Pierre next to a speech bubble, used for greetings and empty states.
-export function Says({ anim = "idle", scale = 5, children, className = "" }) {
+export function Says({ anim = "idle", scale = 5, pettable = false, children, className = "" }) {
   return (
     <div className={`says ${className}`}>
-      <Pierre anim={anim} scale={scale} />
+      <Pierre anim={anim} scale={scale} pettable={pettable} />
       <div className="bubble">{children}</div>
     </div>
   );

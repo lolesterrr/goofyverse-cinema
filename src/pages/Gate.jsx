@@ -95,7 +95,7 @@ export function SignIn() {
 
   return (
     <main className="gate">
-      <Says anim={profiles ? "happy" : "bonjour"} scale={6}>
+      <Says anim={profiles ? "happy" : "bonjour"} scale={6} pettable>
         {profiles ? "Welcome. Who are you tonight?" : "Bonjour. What's the passphrase?"}
       </Says>
       <div className="gate-card">
