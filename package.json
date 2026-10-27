@@ -23,5 +23,6 @@
     "jsdom": "^30.1.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
-  }
+  },
+  "description": "A tiny private Letterboxd for two friends and one cat."
 }
