@@ -267,7 +267,9 @@ dialog.modal::backdrop { background: rgb(4 3 5 / 0.8); }
 .prog-film:hover .display { color: var(--gold); }
 .prog-takes { flex: 2 1 340px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 24px; }
 .take p { margin-top: 4px; font-size: 14px; }
-.entry-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.entry-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: start; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.entry-row .prog-film { flex: none; width: 56px; }
+.entry-row .grow { min-width: 0; }
 
 /* ---------- jazz shelf ---------- */
 
@@ -326,4 +328,6 @@ dialog.modal::backdrop { background: rgb(4 3 5 / 0.8); }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .bubble::before { display: none; }
   .shared-table td, .shared-table th { padding: 6px 4px; }
+  .entry-row { grid-template-columns: 56px minmax(0, 1fr); }
+  .entry-row > .btn { grid-column: 2; justify-self: start; }
 }
