@@ -186,6 +186,23 @@ describe("jazz shelf", () => {
     expect(state.jazz.Kensss[0].title).toBe("Kind of Blue");
     expect((await call(env, "PUT", "/api/jazz/jazz-two", { title: "", category: "game" }, kens)).status).toBe(400);
   });
+
+  it("keeps an optional link and refuses anything that isn't http(s)", async () => {
+    const env = makeEnv();
+    const kens = await signIn(env, "Kensss");
+    const ok = await call(env, "PUT", "/api/jazz/jazz-link", { title: "Song", category: "track", link: " https://youtu.be/dQw4w9WgXcQ " }, kens);
+    expect(ok.status).toBe(200);
+    expect(ok.body.entry.link).toBe("https://youtu.be/dQw4w9WgXcQ");
+    const none = await call(env, "PUT", "/api/jazz/jazz-nolink", { title: "Song 2", category: "track" }, kens);
+    expect(none.body.entry.link).toBe("");
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "ftp://a.com/x.mp3", "nope", 5]) {
+      const r = await call(env, "PUT", "/api/jazz/jazz-bad", { title: "X", category: "track", link: bad }, kens);
+      expect(r.status).toBe(400);
+      expect(r.body.error).toMatch(/^link-/);
+    }
+    const long = await call(env, "PUT", "/api/jazz/jazz-long", { title: "X", category: "track", link: "https://a.com/" + "x".repeat(500) }, kens);
+    expect(long.body.error).toBe("link-too-long");
+  });
 });
 
 describe("watchlist and movie nights", () => {

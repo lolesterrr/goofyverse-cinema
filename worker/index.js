@@ -174,6 +174,20 @@ function str(value, max, { required = false, name = "field" } = {}) {
   return clean;
 }
 
+// An optional http(s) link, e.g. a YouTube, Spotify or SoundCloud page or a direct file.
+function linkOrEmpty(value) {
+  const raw = str(value, 500, { name: "link" });
+  if (!raw) return "";
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new HttpError(400, "link-invalid");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new HttpError(400, "link-invalid");
+  return url.href;
+}
+
 function intOrNull(value, min, max, name) {
   if (value === undefined || value === null || value === "") return null;
   const n = Number(value);
@@ -390,6 +404,7 @@ async function route(request, env) {
       title: str(body.title, 200, { required: true, name: "title" }),
       category: str(body.category, 30, { required: true, name: "category" }).toLowerCase(),
       by: str(body.by, 120, { name: "by" }),
+      link: linkOrEmpty(body.link),
       rating: ratingOrNull(body.rating),
       review: str(body.review, 4000, { name: "review" }),
       createdAt: existing?.createdAt || nowIso(),

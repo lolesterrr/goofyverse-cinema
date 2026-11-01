@@ -1,4 +1,5 @@
 import { useStore } from "../store.jsx";
+import LinkEmbed from "./LinkEmbed.jsx";
 import { Stars } from "./Stars.jsx";
 
 const HUES = { album: 350, track: 38, game: 140, podcast: 210, book: 20, food: 60, other: 190 };
@@ -29,6 +30,7 @@ export default function JazzCard({ entry, who, compact = false }) {
           <strong className="gold">{who}</strong> <Stars value={entry.rating} />
         </div>
         {entry.review && !compact && <p className="review clamp">{entry.review}</p>}
+        {entry.link && !compact && <LinkEmbed link={entry.link} title={entry.title} />}
         {who === me && !compact && (
           <button type="button" className="link-btn" onClick={() => openModal("jazz", { entry })}>
             Edit

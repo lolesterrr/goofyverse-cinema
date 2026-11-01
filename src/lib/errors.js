@@ -13,6 +13,8 @@ const TEXT = {
   "rating-invalid": "Ratings go from half a star to five stars.",
   "date-invalid": "That date doesn't look right.",
   "when-invalid": "Pick a date and time for the night.",
+  "link-invalid": "That link doesn't look right. It should start with https://",
+  "link-too-long": "That link is too long.",
   "title-required": "It needs a title.",
   "category-required": "Pick a category, even a silly one.",
   "review-too-long": "That review is too long. Keep it under 4000 characters.",

@@ -36,7 +36,7 @@ const sample = {
   },
   jazz: {
     Kensss: [{ id: "j1", title: "Kind of Blue", category: "album", by: "Miles Davis", rating: 5, review: "Perfect.", createdAt: "2026-10-01T10:00:00Z" }],
-    Goof: [{ id: "j2", title: "Hades", category: "game", by: "", rating: 4, review: "", createdAt: "2026-10-02T10:00:00Z" }],
+    Goof: [{ id: "j2", title: "Hades", category: "game", by: "", rating: 4, review: "", link: "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", createdAt: "2026-10-02T10:00:00Z" }],
   },
   watchlist: [{ id: "w1", ...heat, note: "friday", addedBy: "Goof", addedAt: "2026-10-01T10:00:00Z" }],
   nights: [
@@ -96,6 +96,9 @@ describe("pages with data", () => {
     const jazz = render(<Jazz />);
     expect(jazz).toContain("Kind of Blue");
     expect(jazz).toContain("Hades");
+    expect(jazz).toContain("Play here"); // the Spotify link on Hades waits for a click
+    expect(jazz).not.toContain("<iframe");
+    expect(jazz).toMatch(/Open on (<!-- -->)?open\.spotify\.com/);
     const us = render(<Us />);
     expect(us).toContain("agree, within half a star");
     expect(us).toContain("Complaint desk");
@@ -143,6 +146,7 @@ describe("gate, layout and dialogs", () => {
     expect(open("night", { film: paprika })).toContain("Book the night");
     expect(open("night", { night: sample.nights[0] })).toContain("Cancel night");
     expect(open("jazz")).toContain("Put it on the shelf");
+    expect(open("jazz")).toContain("Link (optional)");
     expect(open("jazz", { entry: sample.jazz.Kensss[0] })).toContain("Delete entry");
     expect(open("queue")).toContain("Search for a film, series or anime");
     expect(open("film", { film: whiplash })).toContain("Log it");

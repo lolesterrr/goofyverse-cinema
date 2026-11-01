@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
+import { parseLink } from "../lib/embed.js";
 import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import { defaultNightInput, fromLocalInput, todayStr, toLocalInput } from "../lib/dates.js";
 import FilmPicker from "./FilmPicker.jsx";
@@ -274,6 +275,7 @@ export function JazzForm({ entry, onClose }) {
   const [title, setTitle] = useState(entry?.title || "");
   const [category, setCategory] = useState(entry?.category || "album");
   const [by, setBy] = useState(entry?.by || "");
+  const [link, setLink] = useState(entry?.link || "");
   const [rating, setRating] = useState(entry ? entry.rating : null);
   const [review, setReview] = useState(entry?.review || "");
   const [busy, setBusy] = useState(false);
@@ -281,10 +283,14 @@ export function JazzForm({ entry, onClose }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (link.trim() && !parseLink(link)) {
+      setErr("That link doesn't look right. It should start with https://");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
-      await saveJazz({ ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}), title, category, by, rating, review });
+      await saveJazz({ ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}), title, category, by, link: link.trim(), rating, review });
       onClose();
     } catch (error) {
       setErr(explain(error));
@@ -323,6 +329,10 @@ export function JazzForm({ entry, onClose }) {
       <label className="field">
         <span className="label">By (artist, studio, author)</span>
         <input type="text" value={by} onChange={(e) => setBy(e.target.value)} maxLength={120} placeholder="Optional" />
+      </label>
+      <label className="field">
+        <span className="label">Link (optional)</span>
+        <input type="url" value={link} onChange={(e) => setLink(e.target.value)} maxLength={500} placeholder="YouTube, Spotify, SoundCloud, or a direct mp3, mp4 or photo" />
       </label>
       <div className="field">
         <span className="label">Your rating</span>

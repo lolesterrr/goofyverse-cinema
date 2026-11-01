@@ -273,9 +273,9 @@ dialog.modal::backdrop { background: rgb(4 3 5 / 0.8); }
 
 /* ---------- jazz shelf ---------- */
 
-.jazz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.jazz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
 .jazz-row { display: flex; flex-direction: column; gap: 14px; }
-.jazz-card { display: flex; align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.jazz-card { display: flex; align-items: flex-start; gap: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .jazz-card.compact { border: 0; background: none; padding: 0; }
 .vinyl { flex: none; width: 84px; height: 84px; border-radius: 50%; border: 2px solid var(--line2); }
 @media (prefers-reduced-motion: no-preference) { .jazz-card:hover .vinyl { animation: spin 3s linear infinite; } }
@@ -283,6 +283,10 @@ dialog.modal::backdrop { background: rgb(4 3 5 / 0.8); }
 .jazz-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .jazz-text .display { font-size: 20px; line-height: 1.15; }
 .jazz-text .review { font-size: 14px; }
+.embed { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; min-width: 0; max-width: 100%; }
+.embed audio { width: 100%; max-width: 420px; }
+.embed-video, .embed-img { max-width: 100%; max-height: 320px; border-radius: 6px; border: 1px solid var(--line); background: #000; }
+.embed-frame { width: 100%; max-width: 480px; border: 0; border-radius: 8px; background: #000; }
 
 /* ---------- us ---------- */
 
