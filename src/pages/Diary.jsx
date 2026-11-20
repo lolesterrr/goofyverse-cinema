@@ -23,10 +23,10 @@ function EntryRow({ entry, mine }) {
         <Poster path={entry.poster} title={entry.title} size="w92" className="thumb" />
       </button>
       <div className="grow">
-        <div>
+        <button type="button" className="row-title" onClick={() => openModal("film", { film: toFilm(entry) })}>
           <strong className="display">{entry.title}</strong> {entry.year && <span className="muted">{entry.year}</span>}{" "}
           <KindBadge film={entry} /> <Stars value={entry.rating} />
-        </div>
+        </button>
         <div className="chips">
           <span className="muted small-text">{[seasonLabel(entry), fmtDay(entry.watchedOn)].filter(Boolean).join(" · ")}</span>
           {entry.together && <span className="badge gold-badge">Together</span>}

@@ -178,7 +178,14 @@ describe("gate, layout and dialogs", () => {
     expect(open("jazz", { entry: sample.jazz.Kensss[1] })).toContain("Wallpaper");
     expect(open("jazz", { entry: sample.jazz.Kensss[0] })).toContain("Delete entry");
     expect(open("queue")).toContain("Search for a film, series or anime");
-    expect(open("film", { film: whiplash })).toContain("Log it");
+    // Kensss already logged Whiplash, so the dialog offers that log rather than a second one
+    expect(open("film", { film: whiplash })).toContain("Edit your log");
+    expect(open("film", { film: heat })).toContain("Log it"); // nobody has logged Heat
+    const shelf = open("jazzEntry", { entry: sample.jazz.Goof[0], who: "Goof" });
+    expect(shelf).toContain("Hades");
+    expect(shelf).toContain("jazz-view-photo");
+    expect(shelf).not.toContain("Edit this entry"); // Goof's entry, and we are Kensss
+    expect(open("jazzEntry", { entry: sample.jazz.Kensss[0], who: "Kensss" })).toContain("Edit this entry");
     expect(open("log")).toContain("Search for a film, series or anime");
     expect(open("log", { film: bebop })).toContain("Season (optional)");
     expect(open("log", { film: whiplash })).not.toContain("Season (optional)");

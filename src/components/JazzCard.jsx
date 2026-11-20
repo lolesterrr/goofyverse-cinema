@@ -52,7 +52,9 @@ export default function JazzCard({ entry, who, compact = false }) {
       {art}
       <div className="jazz-text">
         <span className="tag">{entry.category}</span>
-        <strong className="display">{entry.title}</strong>
+        <button type="button" className="row-title" onClick={() => openModal("jazzEntry", { entry, who })}>
+          <strong className="display">{entry.title}</strong>
+        </button>
         {entry.by && <span className="muted">{entry.by}</span>}
         <div>
           <strong className="gold">{who}</strong> <Stars value={entry.rating} />

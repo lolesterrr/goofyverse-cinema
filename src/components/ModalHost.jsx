@@ -5,6 +5,7 @@ import { explain } from "../lib/errors.js";
 import { fmtDay } from "../lib/dates.js";
 import { backdropUrl, filmKey, toFilm } from "../lib/tmdb.js";
 import FilmPicker from "./FilmPicker.jsx";
+import JazzView from "./JazzView.jsx";
 import KindBadge, { seasonLabel } from "./KindBadge.jsx";
 import Modal from "./Modal.jsx";
 import Poster from "./Poster.jsx";
@@ -12,7 +13,7 @@ import { Stars } from "./Stars.jsx";
 import { JazzForm, LogForm, NightForm } from "./forms.jsx";
 
 function FilmDetails({ film }) {
-  const { data, addToWatchlist, openModal, say } = useStore();
+  const { data, me, addToWatchlist, openModal, say } = useStore();
   const [info, setInfo] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -39,6 +40,7 @@ function FilmDetails({ film }) {
         .filter((x) => x.entry)
     : [];
   const onList = Boolean(data && data.watchlist.some((w) => filmKey(w) === filmKey(film)));
+  const mine = logs.find((x) => x.profile === me)?.entry || null;
   const backdrop = info && backdropUrl(info.backdrop);
 
   async function queue() {
@@ -100,8 +102,8 @@ function FilmDetails({ film }) {
         <button type="button" className="btn ghost" onClick={() => openModal("night", { film: stored })}>
           Plan a night
         </button>
-        <button type="button" className="btn" onClick={() => openModal("log", { film: stored })}>
-          Log it
+        <button type="button" className="btn" onClick={() => openModal("log", mine ? { entry: mine } : { film: stored })}>
+          {mine ? "Edit your log" : "Log it"}
         </button>
       </div>
     </div>
@@ -153,6 +155,13 @@ export default function ModalHost() {
     return (
       <Modal key={key} title={props.entry ? "Edit the entry" : "Add to the Jazz shelf"} onClose={closeModal}>
         <JazzForm {...props} onClose={closeModal} />
+      </Modal>
+    );
+  }
+  if (type === "jazzEntry") {
+    return (
+      <Modal key={`jazzEntry-${props.entry.id}`} title="On the shelf" onClose={closeModal}>
+        <JazzView {...props} />
       </Modal>
     );
   }

@@ -171,6 +171,15 @@ describe("the whole app against the real worker", () => {
     expect(await screen.findByText("Nothing matches that.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Anime" }));
     expect(await screen.findByText("Cowboy Bebop")).toBeTruthy();
+
+    // tapping the row opens it, and offers the log already written rather than a second one
+    await user.click(screen.getByRole("button", { name: /Cowboy Bebop/ }));
+    const open = await screen.findByRole("dialog");
+    expect(within(open).getByText(/Hajime Yatate/)).toBeTruthy();
+    await user.click(within(open).getByRole("button", { name: "Edit your log" }));
+    const edit = await screen.findByRole("dialog");
+    expect(within(edit).getByRole("button", { name: "Save changes" })).toBeTruthy();
+    expect(within(edit).getByLabelText(/season/i).value).toBe("2");
   });
 
   it("queues a film, plans a movie night from it and RSVPs", async () => {
@@ -213,6 +222,15 @@ describe("the whole app against the real worker", () => {
     await user.click(within(dialog).getByRole("button", { name: "Put it on the shelf" }));
     expect(await screen.findByText("On the shelf.")).toBeTruthy();
     expect(JSON.parse(env.GOOFY_KV.map.get("u:kensss:jazz"))[0]).toMatchObject({ title: "Kind of Blue", category: "album", rating: 5 });
+
+    // tapping the card opens the entry, and from there you can edit it
+    await user.click(await screen.findByRole("button", { name: "Kind of Blue" }));
+    const view = await screen.findByRole("dialog");
+    expect(within(view).getByRole("button", { name: "Edit this entry" })).toBeTruthy();
+    await user.click(within(view).getByRole("button", { name: "Edit this entry" }));
+    expect(await within(await screen.findByRole("dialog")).findByDisplayValue("Kind of Blue")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     await user.click(screen.getByText("Kensss", { selector: "summary" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
