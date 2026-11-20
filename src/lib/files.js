@@ -40,6 +40,9 @@ export function typeOf(file) {
 
 export const kindOfType = (type) => FILE_TYPES[type]?.kind || null;
 
+// The photo a jazz entry wears: the first image attached to it, if any.
+export const coverOf = (entry) => (entry?.files || []).find((f) => kindOfType(f.type) === "image") || null;
+
 export function fmtLimit(mb) {
   return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
 }

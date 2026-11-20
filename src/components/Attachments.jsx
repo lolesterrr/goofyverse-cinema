@@ -2,11 +2,12 @@ import { fileUrl } from "../api.js";
 import { kindOfType } from "../lib/files.js";
 
 // Photos, songs and videos attached to a Jazz entry. Audio and video load only when played.
-export default function Attachments({ files = [], title }) {
-  if (!files.length) return null;
+export default function Attachments({ files = [], title, skipKey = null }) {
+  const shown = files.filter((f) => f.key !== skipKey); // the cover is already on the record
+  if (!shown.length) return null;
   return (
     <div className="attachments">
-      {files.map((f) => {
+      {shown.map((f) => {
         const url = fileUrl(f.key);
         const kind = kindOfType(f.type);
         const label = f.name || title;

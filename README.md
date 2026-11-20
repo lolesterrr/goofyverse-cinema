@@ -97,6 +97,8 @@ Browsers only play H.264 MP4 and WebM. An iPhone HEVC .mov will upload and play 
 3. In the worker: Settings > Bindings > Add > R2 bucket. Variable name must be exactly `JAZZ_FILES`, then pick the bucket.
 4. Open `https://<your worker>/api/health`. It should now say `"files":true`.
 
+Attach a photo and it becomes the record label on that card, with a blurred copy of it behind the card. With several photos, "Use as cover" picks which one goes on the record. An entry with no photo keeps the plain coloured record.
+
 Each file is opened through a long random address, so the file itself needs no sign in (that is what lets photos and songs play inside the page). Nobody can guess an address, but anyone who is handed one can open that one file. Without the bucket everything else works; the upload box just reports that storage isn't connected.
 
 ### Optional: deploy the worker from GitHub

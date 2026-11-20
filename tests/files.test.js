@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MB, SINGLE_MAX, checkFile, checkPrepared, fmtLimit, fmtSize, kindOfType, prepare, typeOf } from "../src/lib/files.js";
+import { MB, SINGLE_MAX, checkFile, checkPrepared, coverOf, fmtLimit, fmtSize, kindOfType, prepare, typeOf } from "../src/lib/files.js";
 
 const file = (name, type, size = 1000) => ({ name, type, size });
 
@@ -47,6 +47,17 @@ describe("upload rules", () => {
     expect(SINGLE_MAX).toBeLessThan(90 * MB); // a worker request can only carry about 100 MB
     expect(fmtLimit(500)).toBe("500 MB");
     expect(fmtLimit(5120)).toBe("5 GB");
+  });
+
+  it("puts the first photo on the record, ignoring songs and videos", () => {
+    const song = { key: "k/a.mp3", type: "audio/mpeg" };
+    const one = { key: "k/b.jpg", type: "image/jpeg" };
+    const two = { key: "k/c.png", type: "image/png" };
+    expect(coverOf({ files: [song, one, two] })).toBe(one);
+    expect(coverOf({ files: [two, one] })).toBe(two); // whichever is first wins
+    expect(coverOf({ files: [song] })).toBeNull();
+    expect(coverOf({ files: [] })).toBeNull();
+    expect(coverOf({})).toBeNull();
   });
 
   it("writes sizes people can read", () => {

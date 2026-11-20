@@ -101,6 +101,12 @@ describe("pages with data", () => {
     expect(jazz).toContain("/api/files/goof/AAAAAAAAAAAAAAAAAAAAAAAA.mp3"); // the song plays from the card
     expect(jazz).toContain("<audio");
     expect(jazz).toContain("/api/files/goof/BBBBBBBBBBBBBBBBBBBBBBBB.jpg");
+    // the photo rides on the record and tints the card, and isn't repeated underneath
+    expect(jazz).toContain("vinyl has-label");
+    expect(jazz).toContain("jazz-card has-wall");
+    expect(jazz).toContain("--wall:url(&quot;/api/files/goof/BBBBBBBBBBBBBBBBBBBBBBBB.jpg&quot;)");
+    expect(jazz.match(/BBBBBBBBBBBBBBBBBBBBBBBB\.jpg/g)).toHaveLength(3); // label img, its link, the wallpaper
+    expect(jazz).not.toContain("attach-photo");
     expect(jazz).toMatch(/Open on (<!-- -->)?open\.spotify\.com/);
     const us = render(<Us />);
     expect(us).toContain("agree, within half a star");

@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
 import { parseLink } from "../lib/embed.js";
-import { MAX_FILES, checkFile, checkPrepared, fmtSize, kindOfType, prepare } from "../lib/files.js";
+import { MAX_FILES, checkFile, checkPrepared, coverOf, fmtSize, kindOfType, prepare } from "../lib/files.js";
 import { Cancelled, uploadFile } from "../lib/upload.js";
 import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import { defaultNightInput, fromLocalInput, todayStr, toLocalInput } from "../lib/dates.js";
@@ -337,6 +337,11 @@ export function JazzForm({ entry, onClose }) {
     }
   }
 
+  // the first photo is the cover, so making one the cover just moves it to the front
+  function makeCover(f) {
+    setFiles((list) => [f, ...list.filter((x) => x.key !== f.key)]);
+  }
+
   function removeFile(f) {
     setFiles((list) => list.filter((x) => x.key !== f.key));
     if (fresh.current.has(f.key)) {
@@ -417,16 +422,28 @@ export function JazzForm({ entry, onClose }) {
         <span className="muted small-text">Up to {MAX_FILES} files. Photos are shrunk first. Songs up to 500 MB, videos up to 5 GB. Big files go up in pieces, so keep this page open until they finish.</span>
         {(files.length > 0 || pending.length > 0) && (
           <ul className="attach-list">
-            {files.map((f) => (
-              <li key={f.key}>
-                <span className="attach-name">
-                  {kindOfType(f.type) === "image" ? "Photo" : kindOfType(f.type) === "video" ? "Video" : "Song"} · {f.name || f.key.split("/")[1]} · {fmtSize(f.size)}
-                </span>
-                <button type="button" className="link-btn" onClick={() => removeFile(f)} aria-label={`Remove ${f.name || "file"}`}>
-                  Remove
-                </button>
-              </li>
-            ))}
+            {files.map((f) => {
+              const isImage = kindOfType(f.type) === "image";
+              const isCover = isImage && coverOf({ files }).key === f.key;
+              return (
+                <li key={f.key}>
+                  <span className="attach-name">
+                    {isImage ? "Photo" : kindOfType(f.type) === "video" ? "Video" : "Song"} · {f.name || f.key.split("/")[1]} · {fmtSize(f.size)}
+                    {isCover && <span className="badge gold-badge cover-badge">On the record</span>}
+                  </span>
+                  <span className="row">
+                    {isImage && !isCover && (
+                      <button type="button" className="link-btn" onClick={() => makeCover(f)} aria-label={`Put ${f.name || "this photo"} on the record`}>
+                        Use as cover
+                      </button>
+                    )}
+                    <button type="button" className="link-btn" onClick={() => removeFile(f)} aria-label={`Remove ${f.name || "file"}`}>
+                      Remove
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
             {pending.map((p) => (
               <li key={p.id} className="muted">
                 <span className="attach-name">
