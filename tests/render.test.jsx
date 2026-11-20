@@ -146,7 +146,7 @@ describe("gate, layout and dialogs", () => {
     expect(open("night", { film: paprika })).toContain("Book the night");
     expect(open("night", { night: sample.nights[0] })).toContain("Cancel night");
     expect(open("jazz")).toContain("Put it on the shelf");
-    expect(open("jazz")).toContain("Link (optional)");
+    expect(open("jazz")).toContain("Link (optional");
     expect(open("jazz", { entry: sample.jazz.Kensss[0] })).toContain("Delete entry");
     expect(open("queue")).toContain("Search for a film, series or anime");
     expect(open("film", { film: whiplash })).toContain("Log it");

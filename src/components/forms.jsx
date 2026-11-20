@@ -331,8 +331,8 @@ export function JazzForm({ entry, onClose }) {
         <input type="text" value={by} onChange={(e) => setBy(e.target.value)} maxLength={120} placeholder="Optional" />
       </label>
       <label className="field">
-        <span className="label">Link (optional)</span>
-        <input type="url" value={link} onChange={(e) => setLink(e.target.value)} maxLength={500} placeholder="YouTube, Spotify, SoundCloud, or a direct mp3, mp4 or photo" />
+        <span className="label">Link (optional, paste only, no file upload)</span>
+        <input type="url" value={link} onChange={(e) => setLink(e.target.value)} maxLength={500} placeholder="Paste a YouTube, Spotify or SoundCloud link" />
       </label>
       <div className="field">
         <span className="label">Your rating</span>
