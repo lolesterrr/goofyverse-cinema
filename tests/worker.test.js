@@ -44,6 +44,49 @@ class FakeR2 {
   async delete(keys) {
     for (const k of Array.isArray(keys) ? keys : [keys]) this.map.delete(k);
   }
+  uploads = new Map();
+  async createMultipartUpload(key, opts = {}) {
+    const uploadId = `up-${this.uploads.size + 1}-${Math.random().toString(36).slice(2)}`;
+    this.uploads.set(uploadId, { key, meta: opts.httpMetadata || {}, parts: new Map() });
+    return { uploadId, key };
+  }
+  resumeMultipartUpload(key, uploadId) {
+    const up = this.uploads.get(uploadId);
+    const bucket = this;
+    const need = () => {
+      if (!up || up.key !== key) throw new Error("no such upload");
+    };
+    return {
+      async uploadPart(n, value) {
+        need();
+        const bytes = new Uint8Array(await new Response(value).arrayBuffer());
+        const etag = `etag-${n}-${bytes.length}`;
+        up.parts.set(n, { bytes, etag });
+        return { partNumber: n, etag };
+      },
+      async complete(parts) {
+        need();
+        const chunks = parts.map((p) => {
+          const got = up.parts.get(p.partNumber);
+          if (!got || got.etag !== p.etag) throw new Error("bad part");
+          return got.bytes;
+        });
+        const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+        let at = 0;
+        for (const c of chunks) {
+          all.set(c, at);
+          at += c.length;
+        }
+        bucket.map.set(key, { bytes: all, httpMetadata: up.meta });
+        bucket.uploads.delete(uploadId);
+        return { size: all.length };
+      },
+      async abort() {
+        need();
+        bucket.uploads.delete(uploadId);
+      },
+    };
+  }
 }
 
 const ORIGIN = "https://lolesterrr.github.io";
@@ -458,7 +501,8 @@ describe("jazz file uploads", () => {
       expect(r.body.error).toBe("file-type");
     }
     expect((await upload(env, kens, "image/jpeg", 16 * 1024 * 1024)).body.error).toBe("file-too-big");
-    expect((await upload(env, kens, "audio/mpeg", 31 * 1024 * 1024)).body.error).toBe("file-too-big");
+    const big = await rawCall(env, "POST", "/api/files", new Uint8Array(5), kens, { "content-type": "audio/mpeg", "content-length": String(91 * 1024 * 1024) });
+    expect(big.status).toBe(413); // over 90 MB has to go up in chunks
     const none = await rawCall(env, "POST", "/api/files", new Uint8Array(5), kens, { "content-type": "audio/mpeg", "content-length": "0" });
     expect(none.status).toBe(411);
     expect(env.JAZZ_FILES.map.size).toBe(0);
@@ -528,5 +572,105 @@ describe("jazz file uploads", () => {
     expect((await rawCall(env, "GET", "/api/files/kensss/nope.mp3")).status).toBe(404);
     expect((await rawCall(env, "GET", "/api/files/KENSSS/AAAAAAAAAAAAAAAAAAAAAAAA.mp3")).status).toBe(404);
     expect((await rawCall(env, "GET", "/api/files/kensss/AAAAAAAAAAAAAAAAAAAAAAAA.mp3")).status).toBe(404);
+  });
+});
+
+describe("chunked uploads for big songs and videos", () => {
+  const MB = 1024 * 1024;
+  const chunkedEnv = () => makeEnv({ JAZZ_FILES: new FakeR2(), PART_SIZE_MB: "5" });
+  const start = (env, token, body) => call(env, "POST", "/api/files/multipart", body, token);
+  const sendPart = (env, token, ticket, n, bytes) =>
+    rawCall(env, "PUT", `/api/files/multipart/${n}`, bytes, token, { "content-type": "application/octet-stream", "content-length": String(bytes.length), "x-upload-token": ticket });
+  const finish = (env, token, ticket, parts) => call(env, "POST", "/api/files/multipart/complete", { parts }, token, { "x-upload-token": ticket });
+  const pattern = (size) => new Uint8Array(size).map((_, i) => (i * 7) % 251);
+
+  it("uploads a file in pieces, joins them, and serves the whole thing", async () => {
+    const env = chunkedEnv();
+    const kens = await signIn(env, "Kensss");
+    const size = 12 * MB; // 5 + 5 + 2
+    const data = pattern(size);
+    const s = await start(env, kens, { type: "video/mp4", size, name: "long film.mp4" });
+    expect(s.status).toBe(201);
+    expect(s.body).toMatchObject({ partSize: 5 * MB, parts: 3 });
+
+    const receipts = [];
+    // out of order on purpose: the order the receipts are sent back in is what counts
+    for (const n of [2, 1, 3]) {
+      const res = await sendPart(env, kens, s.body.token, n, data.slice((n - 1) * 5 * MB, Math.min(n * 5 * MB, size)));
+      expect(res.status).toBe(200);
+      receipts.push((await res.json()).part);
+    }
+    const done = await finish(env, kens, s.body.token, receipts);
+    expect(done.status).toBe(201);
+    expect(done.body.file).toMatchObject({ type: "video/mp4", size, name: "long film.mp4" });
+    expect(done.body.file.key).toMatch(/^kensss\/[A-Za-z0-9_-]{24}\.mp4$/);
+
+    const res = await rawCall(env, "GET", `/api/files/${done.body.file.key}`, undefined, undefined, { range: `bytes=${5 * MB - 2}-${5 * MB + 1}` });
+    expect(res.status).toBe(206);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(data.slice(5 * MB - 2, 5 * MB + 2)); // seeks across a join
+
+    const put = await call(env, "PUT", "/api/jazz/jazz-big", { title: "Big", category: "other", files: [done.body.file] }, kens);
+    expect(put.status).toBe(200);
+    expect(put.body.entry.files[0].size).toBe(size);
+  });
+
+  it("refuses sizes and types that don't belong", async () => {
+    const env = chunkedEnv();
+    const kens = await signIn(env, "Kensss");
+    expect((await start(env, kens, { type: "video/mp4", size: 5121 * MB })).body.error).toBe("file-too-big");
+    expect((await start(env, kens, { type: "audio/mpeg", size: 501 * MB })).body.error).toBe("file-too-big");
+    expect((await start(env, kens, { type: "video/mp4", size: 5120 * MB, name: "ok.mp4" })).status).toBe(201); // exactly 5 GB is fine
+    expect((await start(env, kens, { type: "image/jpeg", size: 6 * MB })).body.error).toBe("file-type");
+    expect((await start(env, kens, { type: "text/html", size: 6 * MB })).body.error).toBe("file-type");
+    for (const size of [0, -5, 1.5, "lots", null]) expect((await start(env, kens, { type: "video/mp4", size })).body.error).toBe("size-invalid");
+    expect((await call(env, "POST", "/api/files/multipart", { type: "video/mp4", size: 6 * MB })).status).toBe(401); // needs a sign in
+  });
+
+  it("checks every piece against the ticket", async () => {
+    const env = chunkedEnv();
+    const kens = await signIn(env, "Kensss");
+    const goof = await signIn(env, "Goof");
+    const s = await start(env, kens, { type: "audio/mpeg", size: 12 * MB, name: "x.mp3" });
+    const t = s.body.token;
+    expect((await sendPart(env, kens, t, 1, pattern(4 * MB))).status).toBe(400); // not full size
+    expect((await sendPart(env, kens, t, 3, pattern(3 * MB))).status).toBe(400); // last piece has the wrong size
+    expect((await sendPart(env, kens, t, 4, pattern(5 * MB))).status).toBe(400); // there is no piece 4
+    expect((await sendPart(env, kens, t, 0, pattern(5 * MB))).status).toBe(400);
+    expect((await sendPart(env, kens, t, "abc", pattern(5 * MB))).status).toBe(400);
+    expect((await sendPart(env, kens, t, 1, pattern(6 * MB))).status).toBe(413); // bigger than a piece may be
+    expect(await (await sendPart(env, goof, t, 1, pattern(5 * MB))).json()).toEqual({ error: "upload-expired" }); // somebody else's ticket
+    expect((await sendPart(env, kens, "garbage", 1, pattern(5 * MB))).status).toBe(401);
+    expect((await sendPart(env, kens, kens, 1, pattern(5 * MB))).status).toBe(401); // a sign-in token isn't a ticket
+    const asLogin = await call(env, "GET", "/api/state", undefined, t); // and a ticket isn't a sign-in token
+    expect(asLogin.status).toBe(401);
+    expect((await sendPart(env, kens, t, 1, pattern(5 * MB))).status).toBe(200);
+  });
+
+  it("won't finish with missing, repeated or made-up receipts", async () => {
+    const env = chunkedEnv();
+    const kens = await signIn(env, "Kensss");
+    const s = await start(env, kens, { type: "audio/mpeg", size: 7 * MB, name: "y.mp3" });
+    const t = s.body.token;
+    const one = (await (await sendPart(env, kens, t, 1, pattern(5 * MB))).json()).part;
+    expect((await finish(env, kens, t, [one])).body.error).toBe("parts-invalid"); // piece 2 never sent
+    const two = (await (await sendPart(env, kens, t, 2, pattern(2 * MB))).json()).part;
+    expect((await finish(env, kens, t, [one, one])).body.error).toBe("parts-invalid");
+    expect((await finish(env, kens, t, [one, { partNumber: 2, etag: "made-up" }])).body.error).toBe("parts-invalid");
+    expect((await finish(env, kens, t, "nope")).body.error).toBe("parts-invalid");
+    expect(env.JAZZ_FILES.map.size).toBe(0);
+    expect((await finish(env, kens, t, [one, two])).status).toBe(201);
+    expect(env.JAZZ_FILES.map.size).toBe(1);
+  });
+
+  it("cancels an upload and drops what was sent", async () => {
+    const env = chunkedEnv();
+    const kens = await signIn(env, "Kensss");
+    const s = await start(env, kens, { type: "video/mp4", size: 6 * MB, name: "z.mp4" });
+    const t = s.body.token;
+    expect((await sendPart(env, kens, t, 1, pattern(5 * MB))).status).toBe(200);
+    expect((await call(env, "DELETE", "/api/files/multipart", undefined, kens, { "x-upload-token": t })).status).toBe(200);
+    expect(env.JAZZ_FILES.uploads.size).toBe(0);
+    expect((await sendPart(env, kens, t, 2, pattern(1 * MB))).status).toBe(400); // too late
+    expect(env.JAZZ_FILES.map.size).toBe(0);
   });
 });

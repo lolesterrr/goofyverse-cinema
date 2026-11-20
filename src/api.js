@@ -36,7 +36,7 @@ export function clearSession() {
   }
 }
 
-async function request(method, path, body, { auth = true, raw = false, headers: extra = {} } = {}) {
+async function request(method, path, body, { auth = true, raw = false, headers: extra = {}, signal } = {}) {
   const base = apiBase();
   if (!base) throw new ApiError(0, "no-api");
   const session = auth ? getSession() : null;
@@ -45,8 +45,9 @@ async function request(method, path, body, { auth = true, raw = false, headers: 
   if (session) headers.authorization = `Bearer ${session.token}`;
   let res;
   try {
-    res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
-  } catch {
+    res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body), signal });
+  } catch (error) {
+    if (error?.name === "AbortError") throw error; // cancelled on purpose, not offline
     throw new ApiError(0, "offline");
   }
   let data = null;
@@ -80,8 +81,14 @@ export const api = {
   delJazz: (id) => request("DELETE", `/api/jazz/${enc(id)}`),
 
   // files: the browser sets the length itself, the worker streams it into R2
-  uploadFile: (blob, type, name) =>
-    request("POST", "/api/files", blob, { raw: true, headers: { "content-type": type, "x-file-name": enc(name || "") } }),
+  uploadFile: (blob, type, name, { signal } = {}) =>
+    request("POST", "/api/files", blob, { raw: true, signal, headers: { "content-type": type, "x-file-name": enc(name || "") } }),
+  // big songs and videos: start, send the pieces, finish (or abort)
+  startUpload: (type, size, name) => request("POST", "/api/files/multipart", { type, size, name }),
+  uploadPart: (token, n, blob, { signal } = {}) =>
+    request("PUT", `/api/files/multipart/${n}`, blob, { raw: true, signal, headers: { "content-type": "application/octet-stream", "x-upload-token": token } }),
+  finishUpload: (token, parts) => request("POST", "/api/files/multipart/complete", { parts }, { headers: { "x-upload-token": token } }),
+  abortUpload: (token) => request("DELETE", "/api/files/multipart", undefined, { headers: { "x-upload-token": token } }),
   delFile: (key) => request("DELETE", `/api/files/${key}`),
 
   addWatch: (film) => request("POST", "/api/watchlist", film),

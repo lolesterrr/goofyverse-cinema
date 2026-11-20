@@ -4,6 +4,7 @@ import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
 import { parseLink } from "../lib/embed.js";
 import { MAX_FILES, checkFile, checkPrepared, fmtSize, kindOfType, prepare } from "../lib/files.js";
+import { Cancelled, uploadFile } from "../lib/upload.js";
 import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import { defaultNightInput, fromLocalInput, todayStr, toLocalInput } from "../lib/dates.js";
 import FilmPicker from "./FilmPicker.jsx";
@@ -282,6 +283,7 @@ export function JazzForm({ entry, onClose }) {
   const [pending, setPending] = useState([]); // names of files still going up
   const [fileErr, setFileErr] = useState("");
   const fresh = useRef(new Set()); // files uploaded during this edit
+  const running = useRef(new Map()); // uploads in flight, so they can be cancelled
   const saved = useRef(false);
   const [rating, setRating] = useState(entry ? entry.rating : null);
   const [review, setReview] = useState(entry?.review || "");
@@ -291,6 +293,7 @@ export function JazzForm({ entry, onClose }) {
   // Closing without saving shouldn't leave this edit's uploads behind.
   useEffect(
     () => () => {
+      for (const controller of running.current.values()) controller.abort();
       if (saved.current) return;
       for (const key of fresh.current) api.delFile(key).catch(() => {});
     },
@@ -312,18 +315,23 @@ export function JazzForm({ entry, onClose }) {
         continue;
       }
       const id = `${file.name}-${Math.random()}`;
-      setPending((p) => [...p, { id, name: file.name }]);
+      const controller = new AbortController();
+      running.current.set(id, controller);
+      setPending((p) => [...p, { id, name: file.name, progress: null }]);
       try {
         const { blob, type } = await prepare(file);
         const tooBig = checkPrepared(blob, type, file.name);
         if (tooBig) throw Object.assign(new Error(tooBig), { code: "file-too-big", message: tooBig });
-        const { file: meta } = await api.uploadFile(blob, type, file.name);
+        const onProgress = (progress) => setPending((p) => p.map((x) => (x.id === id ? { ...x, progress } : x)));
+        const meta = await uploadFile(blob, type, file.name, { onProgress, signal: controller.signal });
         fresh.current.add(meta.key);
         setFiles((f) => [...f, meta]);
         count += 1;
       } catch (error) {
+        if (error instanceof Cancelled || error?.name === "AbortError") continue; // finally still runs
         setFileErr(error?.code === "file-too-big" && error.message !== "file-too-big" ? error.message : explain(error));
       } finally {
+        running.current.delete(id);
         setPending((p) => p.filter((x) => x.id !== id));
       }
     }
@@ -406,7 +414,7 @@ export function JazzForm({ entry, onClose }) {
             e.target.value = "";
           }}
         />
-        <span className="muted small-text">Up to {MAX_FILES} files. Photos are shrunk first. Songs up to 30 MB, videos up to 60 MB.</span>
+        <span className="muted small-text">Up to {MAX_FILES} files. Photos are shrunk first. Songs up to 500 MB, videos up to 5 GB. Big files go up in pieces, so keep this page open until they finish.</span>
         {(files.length > 0 || pending.length > 0) && (
           <ul className="attach-list">
             {files.map((f) => (
@@ -421,7 +429,13 @@ export function JazzForm({ entry, onClose }) {
             ))}
             {pending.map((p) => (
               <li key={p.id} className="muted">
-                Uploading {p.name}…
+                <span className="attach-name">
+                  Uploading {p.name}
+                  {p.progress && p.progress.total > 1 ? `, piece ${Math.min(p.progress.done + 1, p.progress.total)} of ${p.progress.total}` : ""}…
+                </span>
+                <button type="button" className="link-btn" onClick={() => running.current.get(p.id)?.abort()} aria-label={`Cancel uploading ${p.name}`}>
+                  Cancel
+                </button>
               </li>
             ))}
           </ul>

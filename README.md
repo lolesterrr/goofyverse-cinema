@@ -86,7 +86,11 @@ Open <https://lolesterrr.github.io/goofyverse-cinema/>, type the passphrase, pic
 
 ### Optional: photos, music and video on the Jazz shelf
 
-Jazz entries can carry up to four uploaded files: photos (up to 15 MB after the phone shrinks them), songs (30 MB) and videos (60 MB). They live in a Cloudflare R2 bucket, which has a free monthly allowance (10 GB of storage), though Cloudflare asks you to turn R2 on first.
+Jazz entries can carry up to four uploaded files: photos (up to 15 MB after the phone shrinks them), songs (500 MB) and videos (5 GB). They live in a Cloudflare R2 bucket, which has a free monthly allowance (10 GB of storage), though Cloudflare asks you to turn R2 on first.
+
+A worker request can only carry about 100 MB, so anything bigger goes up in pieces and is joined together in R2. A piece that fails is retried, the page keeps the screen awake while it works, and cancelling or closing the form throws away what was sent. The browser has to stay open until an upload finishes.
+
+Browsers only play H.264 MP4 and WebM. An iPhone HEVC .mov will upload and play on Apple devices but often not elsewhere, so convert it first if the other person is on Android or Windows.
 
 1. In the Cloudflare dashboard open Storage & Databases > R2 object storage and turn R2 on.
 2. Create a bucket, for example `goofyverse-jazz`.

@@ -67,7 +67,7 @@ function corsHeaders(request, env) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,x-file-name",
+    "access-control-allow-headers": "authorization,content-type,x-file-name,x-upload-token",
     "access-control-max-age": "86400",
     vary: "Origin",
   };
@@ -251,26 +251,32 @@ function film(body) {
 
 /* ---------- files (R2) ---------- */
 
-// type -> [extension, biggest upload in MB]
+// type -> [extension, biggest file in MB]. A request to a free worker can carry at
+// most 100 MB, so anything above SINGLE_MAX_MB goes up in chunks (multipart).
 const FILE_TYPES = {
   "image/jpeg": ["jpg", 15],
   "image/png": ["png", 15],
   "image/gif": ["gif", 15],
   "image/webp": ["webp", 15],
   "image/avif": ["avif", 15],
-  "audio/mpeg": ["mp3", 30],
-  "audio/mp4": ["m4a", 30],
-  "audio/x-m4a": ["m4a", 30],
-  "audio/aac": ["aac", 30],
-  "audio/wav": ["wav", 30],
-  "audio/x-wav": ["wav", 30],
-  "audio/ogg": ["ogg", 30],
-  "audio/flac": ["flac", 30],
-  "video/mp4": ["mp4", 60],
-  "video/webm": ["webm", 60],
-  "video/quicktime": ["mov", 60],
+  "audio/mpeg": ["mp3", 500],
+  "audio/mp4": ["m4a", 500],
+  "audio/x-m4a": ["m4a", 500],
+  "audio/aac": ["aac", 500],
+  "audio/wav": ["wav", 500],
+  "audio/x-wav": ["wav", 500],
+  "audio/ogg": ["ogg", 500],
+  "audio/flac": ["flac", 500],
+  "video/mp4": ["mp4", 5120],
+  "video/webm": ["webm", 5120],
+  "video/quicktime": ["mov", 5120],
 };
 const MB = 1024 * 1024;
+const SINGLE_MAX_MB = 90;
+const UPLOAD_TTL = DAY; // how long a chunked upload may take
+// Every chunk but the last must be the same size, and R2 wants at least 5 MiB.
+// PART_SIZE_MB exists so tests can use small chunks; leave it unset.
+const partSize = (env) => Math.min(Math.max(Number(env.PART_SIZE_MB) || 32, 5), 90) * MB;
 const MAX_FILES_PER_ENTRY = 4;
 const OWNER_RE = /^[a-z0-9-]{1,40}$/;
 const FILE_RE = /^[A-Za-z0-9_-]{20,40}\.[a-z0-9]{2,4}$/;
@@ -286,17 +292,105 @@ async function uploadFile(request, env, me) {
   if (!spec) throw new HttpError(415, "file-type");
   const length = Number(request.headers.get("content-length"));
   if (!Number.isInteger(length) || length <= 0) throw new HttpError(411, "length-required");
-  if (length > spec[1] * MB) throw new HttpError(413, "file-too-big");
-  let label = "";
-  try {
-    label = decodeURIComponent(request.headers.get("x-file-name") || "");
-  } catch {
-    /* keep it empty */
-  }
-  label = label.replace(/[\\/\u0000-\u001f]/g, "").trim().slice(0, 120);
-  const key = `${slug(me)}/${b64u(crypto.getRandomValues(new Uint8Array(18)))}.${spec[0]}`;
+  if (length > Math.min(spec[1], SINGLE_MAX_MB) * MB) throw new HttpError(413, "file-too-big");
+  const label = fileLabel(decodeHeader(request.headers.get("x-file-name")));
+  const key = newFileKey(me, spec[0]);
   await env.JAZZ_FILES.put(`jazz/${key}`, request.body, { httpMetadata: { contentType: type } });
   return json({ file: { key, type, size: length, name: label } }, 201);
+}
+
+function decodeHeader(value) {
+  try {
+    return decodeURIComponent(value || "");
+  } catch {
+    return "";
+  }
+}
+
+const fileLabel = (value) => String(value || "").replace(/[\\/\u0000-\u001f]/g, "").trim().slice(0, 120);
+const newFileKey = (me, ext) => `${slug(me)}/${b64u(crypto.getRandomValues(new Uint8Array(18)))}.${ext}`;
+
+// ----- chunked uploads for big songs and videos
+// start: the worker opens a multipart upload in R2 and returns a signed ticket that
+// remembers the file, its type and its size. The phone then sends the chunks one
+// by one and finishes with the list of receipts (etags) R2 gave back.
+
+async function startMultipart(request, env, me) {
+  needFiles(env);
+  const body = await readBody(request);
+  const type = String(body.type || "").toLowerCase();
+  const spec = FILE_TYPES[type];
+  if (!spec || !(type.startsWith("audio/") || type.startsWith("video/"))) throw new HttpError(415, "file-type");
+  const size = Number(body.size);
+  if (!Number.isInteger(size) || size <= 0) throw new HttpError(400, "size-invalid");
+  if (size > spec[1] * MB) throw new HttpError(413, "file-too-big");
+  const label = fileLabel(body.name);
+  const key = newFileKey(me, spec[0]);
+  const ps = partSize(env);
+  const upload = await env.JAZZ_FILES.createMultipartUpload(`jazz/${key}`, { httpMetadata: { contentType: type } });
+  const exp = Math.floor(Date.now() / 1000) + UPLOAD_TTL;
+  // "o" not "p": this ticket must never pass for a sign-in token
+  const token = await signToken(env, { o: me, k: key, u: upload.uploadId, t: type, s: size, n: label, ps, exp });
+  return json({ token, partSize: ps, parts: Math.ceil(size / ps) }, 201);
+}
+
+async function ticketFor(request, env, me) {
+  const t = await verifyToken(env, request.headers.get("x-upload-token") || "");
+  if (!t || t.o !== me || typeof t.k !== "string" || typeof t.u !== "string" || !Number.isInteger(t.s) || !Number.isInteger(t.ps)) {
+    throw new HttpError(401, "upload-expired");
+  }
+  return { ...t, total: Math.ceil(t.s / t.ps) };
+}
+
+async function uploadPart(request, env, me, number) {
+  needFiles(env);
+  const t = await ticketFor(request, env, me);
+  const n = Number(number);
+  if (!Number.isInteger(n) || n < 1 || n > t.total) throw new HttpError(400, "part-invalid");
+  const expected = n < t.total ? t.ps : t.s - (n - 1) * t.ps;
+  if (Number(request.headers.get("content-length")) > t.ps) throw new HttpError(413, "file-too-big");
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength !== expected) throw new HttpError(400, "part-invalid");
+  let part;
+  try {
+    part = await env.JAZZ_FILES.resumeMultipartUpload(`jazz/${t.k}`, t.u).uploadPart(n, bytes);
+  } catch {
+    throw new HttpError(400, "part-invalid"); // the upload was cancelled or already finished
+  }
+  return json({ part: { partNumber: part.partNumber, etag: part.etag } });
+}
+
+async function finishMultipart(request, env, me) {
+  needFiles(env);
+  const t = await ticketFor(request, env, me);
+  const body = await readBody(request);
+  const given = Array.isArray(body.parts) ? body.parts : [];
+  const parts = given
+    .map((p) => ({ partNumber: Number(p?.partNumber), etag: typeof p?.etag === "string" ? p.etag.slice(0, 200) : "" }))
+    .sort((x, y) => x.partNumber - y.partNumber);
+  if (parts.length !== t.total || parts.some((p, i) => p.partNumber !== i + 1 || !p.etag)) throw new HttpError(400, "parts-invalid");
+  let object;
+  try {
+    object = await env.JAZZ_FILES.resumeMultipartUpload(`jazz/${t.k}`, t.u).complete(parts);
+  } catch {
+    throw new HttpError(400, "parts-invalid");
+  }
+  if (object.size !== t.s) {
+    await env.JAZZ_FILES.delete(`jazz/${t.k}`);
+    throw new HttpError(400, "parts-invalid");
+  }
+  return json({ file: { key: t.k, type: t.t, size: t.s, name: t.n } }, 201);
+}
+
+async function abortMultipart(request, env, me) {
+  needFiles(env);
+  const t = await ticketFor(request, env, me);
+  try {
+    await env.JAZZ_FILES.resumeMultipartUpload(`jazz/${t.k}`, t.u).abort();
+  } catch {
+    /* already finished or gone */
+  }
+  return json({ ok: true });
 }
 
 async function serveFile(request, env, owner, name) {
@@ -527,6 +621,10 @@ async function route(request, env) {
   }
 
   // ----- files for the jazz shelf (own uploads only)
+  if (method === "POST" && a === "files" && b === "multipart" && !c) return startMultipart(request, env, me);
+  if (method === "POST" && a === "files" && b === "multipart" && c === "complete") return finishMultipart(request, env, me);
+  if (method === "PUT" && a === "files" && b === "multipart" && c && !parts[4]) return uploadPart(request, env, me, c);
+  if (method === "DELETE" && a === "files" && b === "multipart" && !c) return abortMultipart(request, env, me);
   if (method === "POST" && a === "files" && !b) return uploadFile(request, env, me);
   if (method === "DELETE" && a === "files" && b && c && !parts[4]) return deleteFile(env, me, b, c);
 

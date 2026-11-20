@@ -1,6 +1,8 @@
 // What the Jazz shelf accepts as an upload. Keep in step with FILE_TYPES in worker/index.js.
 export const MB = 1024 * 1024;
 export const MAX_FILES = 4;
+// Above this, songs and videos go up in chunks (see upload.js).
+export const SINGLE_MAX = 25 * MB;
 const BIGGEST_PHOTO_BEFORE_SHRINKING = 40 * MB;
 
 export const FILE_TYPES = {
@@ -9,17 +11,17 @@ export const FILE_TYPES = {
   "image/gif": { kind: "image", mb: 15 },
   "image/webp": { kind: "image", mb: 15 },
   "image/avif": { kind: "image", mb: 15 },
-  "audio/mpeg": { kind: "audio", mb: 30 },
-  "audio/mp4": { kind: "audio", mb: 30 },
-  "audio/x-m4a": { kind: "audio", mb: 30 },
-  "audio/aac": { kind: "audio", mb: 30 },
-  "audio/wav": { kind: "audio", mb: 30 },
-  "audio/x-wav": { kind: "audio", mb: 30 },
-  "audio/ogg": { kind: "audio", mb: 30 },
-  "audio/flac": { kind: "audio", mb: 30 },
-  "video/mp4": { kind: "video", mb: 60 },
-  "video/webm": { kind: "video", mb: 60 },
-  "video/quicktime": { kind: "video", mb: 60 },
+  "audio/mpeg": { kind: "audio", mb: 500 },
+  "audio/mp4": { kind: "audio", mb: 500 },
+  "audio/x-m4a": { kind: "audio", mb: 500 },
+  "audio/aac": { kind: "audio", mb: 500 },
+  "audio/wav": { kind: "audio", mb: 500 },
+  "audio/x-wav": { kind: "audio", mb: 500 },
+  "audio/ogg": { kind: "audio", mb: 500 },
+  "audio/flac": { kind: "audio", mb: 500 },
+  "video/mp4": { kind: "video", mb: 5120 },
+  "video/webm": { kind: "video", mb: 5120 },
+  "video/quicktime": { kind: "video", mb: 5120 },
 };
 
 const BY_EXTENSION = {
@@ -38,7 +40,12 @@ export function typeOf(file) {
 
 export const kindOfType = (type) => FILE_TYPES[type]?.kind || null;
 
+export function fmtLimit(mb) {
+  return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
+}
+
 export function fmtSize(bytes) {
+  if (bytes >= 1024 * MB) return `${(bytes / (1024 * MB)).toFixed(1)} GB`;
   if (bytes >= MB) return `${(bytes / MB).toFixed(bytes >= 10 * MB ? 0 : 1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
@@ -51,7 +58,7 @@ export function checkFile(file) {
   if (!file.size) return `${name} is empty.`;
   const kind = FILE_TYPES[type].kind;
   const limit = kind === "image" ? BIGGEST_PHOTO_BEFORE_SHRINKING : FILE_TYPES[type].mb * MB;
-  if (file.size > limit) return `${name} is too big. ${kind === "image" ? "Photos" : kind === "audio" ? "Songs" : "Videos"} can be up to ${Math.round(limit / MB)} MB.`;
+  if (file.size > limit) return `${name} is too big. ${kind === "image" ? "Photos" : kind === "audio" ? "Songs" : "Videos"} can be up to ${fmtLimit(Math.round(limit / MB))}.`;
   return null;
 }
 
@@ -84,6 +91,6 @@ export async function prepare(file, { maxSide = 2000 } = {}) {
 // After shrinking, the real limit for the stored kind applies.
 export function checkPrepared(blob, type, name = "That file") {
   const spec = FILE_TYPES[type];
-  if (!spec || blob.size > spec.mb * MB) return `${name} is still too big (limit ${spec ? spec.mb : 0} MB).`;
+  if (!spec || blob.size > spec.mb * MB) return `${name} is still too big (limit ${spec ? fmtLimit(spec.mb) : "0 MB"}).`;
   return null;
 }
