@@ -18,6 +18,34 @@ class FakeKV {
   }
 }
 
+// Just enough of an R2 bucket: put, head, get (with ranges), delete.
+class FakeR2 {
+  constructor() {
+    this.map = new Map();
+  }
+  async put(key, body, opts = {}) {
+    const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+    this.map.set(key, { bytes, httpMetadata: opts.httpMetadata || {} });
+  }
+  async head(key) {
+    const o = this.map.get(key);
+    return o ? { size: o.bytes.length, httpMetadata: o.httpMetadata } : null;
+  }
+  async get(key, opts = {}) {
+    const o = this.map.get(key);
+    if (!o) return null;
+    const size = o.bytes.length;
+    const m = /^bytes=(\d*)-(\d*)$/.exec(opts.range?.get?.("range") || "");
+    if (!m) return { size, httpMetadata: o.httpMetadata, body: new Blob([o.bytes]).stream() };
+    const start = m[1] === "" ? Math.max(size - Number(m[2]), 0) : Number(m[1]);
+    const end = m[1] === "" ? size - 1 : Math.min(m[2] === "" ? size - 1 : Number(m[2]), size - 1);
+    return { size, httpMetadata: o.httpMetadata, range: { offset: start, length: end - start + 1 }, body: new Blob([o.bytes.slice(start, end + 1)]).stream() };
+  }
+  async delete(keys) {
+    for (const k of Array.isArray(keys) ? keys : [keys]) this.map.delete(k);
+  }
+}
+
 const ORIGIN = "https://lolesterrr.github.io";
 
 function makeEnv(extra = {}) {
@@ -40,6 +68,20 @@ async function call(env, method, path, body, token, headers = {}) {
   return { status: res.status, body: text ? JSON.parse(text) : null, headers: res.headers };
 }
 
+async function rawCall(env, method, path, bytes, token, headers = {}) {
+  const init = { method, headers: { origin: ORIGIN, ...headers } };
+  if (token) init.headers.authorization = `Bearer ${token}`;
+  if (bytes !== undefined) init.body = bytes;
+  const res = await handle(new Request(`https://worker.test${path}`, init), env);
+  return res;
+}
+
+async function upload(env, token, type, size = 1000, name = "song.mp3") {
+  const bytes = new Uint8Array(size).map((_, i) => i % 251);
+  const res = await rawCall(env, "POST", "/api/files", bytes, token, { "content-type": type, "content-length": String(size), "x-file-name": encodeURIComponent(name) });
+  return { status: res.status, body: await res.json(), bytes };
+}
+
 async function signIn(env, profile = "Kensss") {
   const r = await call(env, "POST", "/api/login", { passphrase: env.PASSPHRASE, profile });
   expect(r.status).toBe(200);
@@ -51,7 +93,8 @@ const sampleFilm = { tmdbId: 129, title: "Spirited Away", year: 2001, poster: "/
 describe("sign in", () => {
   it("reports what is configured on /api/health without a token", async () => {
     const r = await call(makeEnv(), "GET", "/api/health");
-    expect(r.body).toEqual({ ok: true, kv: true, auth: true, tmdb: false });
+    expect(r.body).toEqual({ ok: true, kv: true, auth: true, tmdb: false, files: false });
+    expect((await call(makeEnv({ JAZZ_FILES: new FakeR2() }), "GET", "/api/health")).body.files).toBe(true);
   });
 
   it("rejects a wrong passphrase and accepts the right one", async () => {
@@ -369,5 +412,121 @@ describe("tmdb proxy", () => {
     expect((await call(env, "GET", "/api/tmdb/search?q=a", undefined, token)).status).toBe(502);
     globalThis.fetch = vi.fn(async () => new Response("{}", { status: 404 }));
     expect((await call(env, "GET", "/api/tmdb/movie/1", undefined, token)).status).toBe(404);
+  });
+});
+
+describe("jazz file uploads", () => {
+  const filesEnv = () => makeEnv({ JAZZ_FILES: new FakeR2() });
+
+  it("stores a file, hands back an address, and serves it without a token", async () => {
+    const env = filesEnv();
+    const kens = await signIn(env, "Kensss");
+    const up = await upload(env, kens, "audio/mpeg", 2000, "Blue in Green.mp3");
+    expect(up.status).toBe(201);
+    expect(up.body.file).toMatchObject({ type: "audio/mpeg", size: 2000, name: "Blue in Green.mp3" });
+    expect(up.body.file.key).toMatch(/^kensss\/[A-Za-z0-9_-]{24}\.mp3$/);
+
+    const res = await rawCall(env, "GET", `/api/files/${up.body.file.key}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/mpeg");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(res.headers.get("content-length")).toBe("2000");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(up.bytes);
+  });
+
+  it("supports range requests so audio and video can seek", async () => {
+    const env = filesEnv();
+    const kens = await signIn(env, "Kensss");
+    const up = await upload(env, kens, "video/mp4", 1000, "clip.mp4");
+    const res = await rawCall(env, "GET", `/api/files/${up.body.file.key}`, undefined, undefined, { range: "bytes=100-199" });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe("bytes 100-199/1000");
+    expect(res.headers.get("content-length")).toBe("100");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(up.bytes.slice(100, 200));
+    const tail = await rawCall(env, "GET", `/api/files/${up.body.file.key}`, undefined, undefined, { range: "bytes=-50" });
+    expect(tail.headers.get("content-range")).toBe("bytes 950-999/1000");
+  });
+
+  it("needs a sign in to upload, and refuses wrong types, empty bodies and big files", async () => {
+    const env = filesEnv();
+    const kens = await signIn(env, "Kensss");
+    expect((await upload(env, undefined, "audio/mpeg")).status).toBe(401);
+    for (const bad of ["text/html", "image/svg+xml", "application/pdf", "application/javascript"]) {
+      const r = await upload(env, kens, bad);
+      expect(r.status).toBe(415);
+      expect(r.body.error).toBe("file-type");
+    }
+    expect((await upload(env, kens, "image/jpeg", 16 * 1024 * 1024)).body.error).toBe("file-too-big");
+    expect((await upload(env, kens, "audio/mpeg", 31 * 1024 * 1024)).body.error).toBe("file-too-big");
+    const none = await rawCall(env, "POST", "/api/files", new Uint8Array(5), kens, { "content-type": "audio/mpeg", "content-length": "0" });
+    expect(none.status).toBe(411);
+    expect(env.JAZZ_FILES.map.size).toBe(0);
+  });
+
+  it("says so when the bucket isn't connected", async () => {
+    const env = makeEnv();
+    const kens = await signIn(env, "Kensss");
+    const r = await upload(env, kens, "audio/mpeg");
+    expect(r.status).toBe(503);
+    expect(r.body.error).toBe("files-not-bound");
+    const put = await call(env, "PUT", "/api/jazz/jazz-plain", { title: "No files", category: "track" }, kens);
+    expect(put.status).toBe(200); // an entry with no files never needs the bucket
+  });
+
+  it("attaches files to an entry, only your own, and cleans up what you remove", async () => {
+    const env = filesEnv();
+    const kens = await signIn(env, "Kensss");
+    const goof = await signIn(env, "Goof");
+    const a = (await upload(env, kens, "image/png", 100, "cover.png")).body.file;
+    const b = (await upload(env, kens, "audio/mpeg", 100, "song.mp3")).body.file;
+    const theirs = (await upload(env, goof, "audio/mpeg", 100, "goof.mp3")).body.file;
+
+    const put = await call(env, "PUT", "/api/jazz/jazz-files", { title: "Mix", category: "album", files: [a, b] }, kens);
+    expect(put.status).toBe(200);
+    expect(put.body.entry.files.map((f) => f.key)).toEqual([a.key, b.key]);
+
+    // can't point at somebody else's file, a made-up one, or the same one twice
+    for (const files of [[theirs], [{ key: "kensss/AAAAAAAAAAAAAAAAAAAAAAAA.mp3", name: "x" }], [a, a], "nope", [{ key: "../goof/x" }]]) {
+      const r = await call(env, "PUT", "/api/jazz/jazz-files", { title: "Mix", category: "album", files }, kens);
+      expect(r.status).toBe(400);
+      expect(r.body.error).toBe("files-invalid");
+    }
+    const many = [a, b, a, b, a].map((f, i) => ({ ...f, key: f.key + i }));
+    expect((await call(env, "PUT", "/api/jazz/jazz-files", { title: "Mix", category: "album", files: many }, kens)).body.error).toBe("too-many-files");
+
+    // leaving files out keeps them; sending a shorter list deletes the dropped one from the bucket
+    const keep = await call(env, "PUT", "/api/jazz/jazz-files", { title: "Mix v2", category: "album" }, kens);
+    expect(keep.body.entry.files).toHaveLength(2);
+    await call(env, "PUT", "/api/jazz/jazz-files", { title: "Mix v2", category: "album", files: [a] }, kens);
+    expect(env.JAZZ_FILES.map.has(`jazz/${b.key}`)).toBe(false);
+    expect(env.JAZZ_FILES.map.has(`jazz/${a.key}`)).toBe(true);
+
+    // deleting the entry deletes its files
+    await call(env, "DELETE", "/api/jazz/jazz-files", undefined, kens);
+    expect(env.JAZZ_FILES.map.has(`jazz/${a.key}`)).toBe(false);
+    expect(env.JAZZ_FILES.map.has(`jazz/${theirs.key}`)).toBe(true);
+  });
+
+  it("lets you delete an upload you never saved, but not somebody else's or one in use", async () => {
+    const env = filesEnv();
+    const kens = await signIn(env, "Kensss");
+    const goof = await signIn(env, "Goof");
+    const loose = (await upload(env, kens, "audio/mpeg", 100)).body.file;
+    const used = (await upload(env, kens, "audio/mpeg", 100)).body.file;
+    await call(env, "PUT", "/api/jazz/jazz-used", { title: "Used", category: "track", files: [used] }, kens);
+
+    expect((await call(env, "DELETE", `/api/files/${loose.key}`, undefined, goof)).status).toBe(404);
+    expect((await call(env, "DELETE", `/api/files/${used.key}`, undefined, kens)).status).toBe(409);
+    expect((await call(env, "DELETE", `/api/files/${loose.key}`, undefined, kens)).status).toBe(200);
+    expect(env.JAZZ_FILES.map.has(`jazz/${loose.key}`)).toBe(false);
+    expect(env.JAZZ_FILES.map.has(`jazz/${used.key}`)).toBe(true);
+  });
+
+  it("404s for bad or missing file addresses", async () => {
+    const env = filesEnv();
+    expect((await rawCall(env, "GET", "/api/files/kensss/nope.mp3")).status).toBe(404);
+    expect((await rawCall(env, "GET", "/api/files/KENSSS/AAAAAAAAAAAAAAAAAAAAAAAA.mp3")).status).toBe(404);
+    expect((await rawCall(env, "GET", "/api/files/kensss/AAAAAAAAAAAAAAAAAAAAAAAA.mp3")).status).toBe(404);
   });
 });

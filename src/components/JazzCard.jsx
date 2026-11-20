@@ -1,4 +1,5 @@
 import { useStore } from "../store.jsx";
+import Attachments from "./Attachments.jsx";
 import LinkEmbed from "./LinkEmbed.jsx";
 import { Stars } from "./Stars.jsx";
 
@@ -30,7 +31,9 @@ export default function JazzCard({ entry, who, compact = false }) {
           <strong className="gold">{who}</strong> <Stars value={entry.rating} />
         </div>
         {entry.review && !compact && <p className="review clamp">{entry.review}</p>}
+        {entry.files?.length > 0 && !compact && <Attachments files={entry.files} title={entry.title} />}
         {entry.link && !compact && <LinkEmbed link={entry.link} title={entry.title} />}
+        {entry.files?.length > 0 && compact && <span className="muted small-text">{entry.files.length} attached</span>}
         {who === me && !compact && (
           <button type="button" className="link-btn" onClick={() => openModal("jazz", { entry })}>
             Edit

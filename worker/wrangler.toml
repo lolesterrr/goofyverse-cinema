@@ -14,6 +14,13 @@ ALLOWED_ORIGINS = "https://lolesterrr.github.io,http://localhost:5173"
 binding = "GOOFY_KV"
 id = "PASTE_YOUR_KV_NAMESPACE_ID"
 
+# Optional: photos, music and video on the Jazz shelf. Make a bucket once with
+#   npx wrangler r2 bucket create goofyverse-jazz
+# then remove the # from the three lines below and deploy again.
+# [[r2_buckets]]
+# binding = "JAZZ_FILES"
+# bucket_name = "goofyverse-jazz"
+
 # Secrets are NOT stored in this file. Set them with:
 #   npx wrangler secret put PASSPHRASE
 #   npx wrangler secret put SIGNING_KEY

@@ -36,16 +36,16 @@ export function clearSession() {
   }
 }
 
-async function request(method, path, body, { auth = true } = {}) {
+async function request(method, path, body, { auth = true, raw = false, headers: extra = {} } = {}) {
   const base = apiBase();
   if (!base) throw new ApiError(0, "no-api");
   const session = auth ? getSession() : null;
-  const headers = {};
-  if (body !== undefined) headers["content-type"] = "application/json";
+  const headers = { ...extra };
+  if (body !== undefined && !raw) headers["content-type"] = "application/json";
   if (session) headers.authorization = `Bearer ${session.token}`;
   let res;
   try {
-    res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
   } catch {
     throw new ApiError(0, "offline");
   }
@@ -79,6 +79,11 @@ export const api = {
   putJazz: (id, entry) => request("PUT", `/api/jazz/${enc(id)}`, entry),
   delJazz: (id) => request("DELETE", `/api/jazz/${enc(id)}`),
 
+  // files: the browser sets the length itself, the worker streams it into R2
+  uploadFile: (blob, type, name) =>
+    request("POST", "/api/files", blob, { raw: true, headers: { "content-type": type, "x-file-name": enc(name || "") } }),
+  delFile: (key) => request("DELETE", `/api/files/${key}`),
+
   addWatch: (film) => request("POST", "/api/watchlist", film),
   delWatch: (id) => request("DELETE", `/api/watchlist/${enc(id)}`),
 
@@ -93,3 +98,6 @@ export const api = {
   // full details for a search hit, whichever kind of thing it is
   details: (film) => request("GET", `/api/tmdb/${film.media === "tv" ? "tv" : "movie"}/${enc(film.tmdbId)}`),
 };
+
+// Where an uploaded file can be opened from. The address itself is the key.
+export const fileUrl = (key) => `${apiBase()}/api/files/${key}`;

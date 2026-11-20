@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { api } from "../api.js";
 import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
 import { parseLink } from "../lib/embed.js";
+import { MAX_FILES, checkFile, checkPrepared, fmtSize, kindOfType, prepare } from "../lib/files.js";
 import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import { defaultNightInput, fromLocalInput, todayStr, toLocalInput } from "../lib/dates.js";
 import FilmPicker from "./FilmPicker.jsx";
@@ -26,7 +28,7 @@ function FilmChip({ film, onChange }) {
   );
 }
 
-function Actions({ busy, onClose, saveLabel = "Save", onDelete, deleteLabel = "Delete" }) {
+function Actions({ busy, saveDisabled = false, onClose, saveLabel = "Save", onDelete, deleteLabel = "Delete" }) {
   const [confirm, setConfirm] = useState(false);
   return (
     <div className="form-actions">
@@ -44,7 +46,7 @@ function Actions({ busy, onClose, saveLabel = "Save", onDelete, deleteLabel = "D
       <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
         Cancel
       </button>
-      <button type="submit" className="btn" disabled={busy}>
+      <button type="submit" className="btn" disabled={busy || saveDisabled}>
         {busy ? "Saving…" : saveLabel}
       </button>
     </div>
@@ -276,13 +278,68 @@ export function JazzForm({ entry, onClose }) {
   const [category, setCategory] = useState(entry?.category || "album");
   const [by, setBy] = useState(entry?.by || "");
   const [link, setLink] = useState(entry?.link || "");
+  const [files, setFiles] = useState(entry?.files || []);
+  const [pending, setPending] = useState([]); // names of files still going up
+  const [fileErr, setFileErr] = useState("");
+  const fresh = useRef(new Set()); // files uploaded during this edit
+  const saved = useRef(false);
   const [rating, setRating] = useState(entry ? entry.rating : null);
   const [review, setReview] = useState(entry?.review || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
+  // Closing without saving shouldn't leave this edit's uploads behind.
+  useEffect(
+    () => () => {
+      if (saved.current) return;
+      for (const key of fresh.current) api.delFile(key).catch(() => {});
+    },
+    [],
+  );
+
+  async function addFiles(list) {
+    const picked = Array.from(list);
+    setFileErr("");
+    let count = files.length;
+    for (const file of picked) {
+      if (count >= MAX_FILES) {
+        setFileErr(`Up to ${MAX_FILES} files per entry.`);
+        break;
+      }
+      const problem = checkFile(file);
+      if (problem) {
+        setFileErr(problem);
+        continue;
+      }
+      const id = `${file.name}-${Math.random()}`;
+      setPending((p) => [...p, { id, name: file.name }]);
+      try {
+        const { blob, type } = await prepare(file);
+        const tooBig = checkPrepared(blob, type, file.name);
+        if (tooBig) throw Object.assign(new Error(tooBig), { code: "file-too-big", message: tooBig });
+        const { file: meta } = await api.uploadFile(blob, type, file.name);
+        fresh.current.add(meta.key);
+        setFiles((f) => [...f, meta]);
+        count += 1;
+      } catch (error) {
+        setFileErr(error?.code === "file-too-big" && error.message !== "file-too-big" ? error.message : explain(error));
+      } finally {
+        setPending((p) => p.filter((x) => x.id !== id));
+      }
+    }
+  }
+
+  function removeFile(f) {
+    setFiles((list) => list.filter((x) => x.key !== f.key));
+    if (fresh.current.has(f.key)) {
+      fresh.current.delete(f.key);
+      api.delFile(f.key).catch(() => {});
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
+    if (pending.length) return;
     if (link.trim() && !parseLink(link)) {
       setErr("That link doesn't look right. It should start with https://");
       return;
@@ -290,7 +347,8 @@ export function JazzForm({ entry, onClose }) {
     setBusy(true);
     setErr("");
     try {
-      await saveJazz({ ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}), title, category, by, link: link.trim(), rating, review });
+      await saveJazz({ ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}), title, category, by, link: link.trim(), files, rating, review });
+      saved.current = true;
       onClose();
     } catch (error) {
       setErr(explain(error));
@@ -331,9 +389,45 @@ export function JazzForm({ entry, onClose }) {
         <input type="text" value={by} onChange={(e) => setBy(e.target.value)} maxLength={120} placeholder="Optional" />
       </label>
       <label className="field">
-        <span className="label">Link (optional, paste only, no file upload)</span>
-        <input type="url" value={link} onChange={(e) => setLink(e.target.value)} maxLength={500} placeholder="Paste a YouTube, Spotify or SoundCloud link" />
+        <span className="label">Link (optional)</span>
+        <input type="url" value={link} onChange={(e) => setLink(e.target.value)} maxLength={500} placeholder="YouTube, Spotify or SoundCloud" />
       </label>
+      <div className="field">
+        <span className="label">Photos, music, video (optional)</span>
+        <input
+          type="file"
+          multiple
+          accept="image/*,audio/*,video/*,.mp3,.m4a,.flac,.wav,.ogg,.mp4,.mov,.webm"
+          aria-label="Add photos, music or video"
+          disabled={pending.length > 0 || files.length >= MAX_FILES}
+          onChange={(e) => {
+            const picked = e.target.files;
+            if (picked && picked.length) addFiles(picked);
+            e.target.value = "";
+          }}
+        />
+        <span className="muted small-text">Up to {MAX_FILES} files. Photos are shrunk first. Songs up to 30 MB, videos up to 60 MB.</span>
+        {(files.length > 0 || pending.length > 0) && (
+          <ul className="attach-list">
+            {files.map((f) => (
+              <li key={f.key}>
+                <span className="attach-name">
+                  {kindOfType(f.type) === "image" ? "Photo" : kindOfType(f.type) === "video" ? "Video" : "Song"} · {f.name || f.key.split("/")[1]} · {fmtSize(f.size)}
+                </span>
+                <button type="button" className="link-btn" onClick={() => removeFile(f)} aria-label={`Remove ${f.name || "file"}`}>
+                  Remove
+                </button>
+              </li>
+            ))}
+            {pending.map((p) => (
+              <li key={p.id} className="muted">
+                Uploading {p.name}…
+              </li>
+            ))}
+          </ul>
+        )}
+        {fileErr && <p className="notice" role="alert">{fileErr}</p>}
+      </div>
       <div className="field">
         <span className="label">Your rating</span>
         <StarInput value={rating} onChange={setRating} label="Your rating" />
@@ -343,7 +437,7 @@ export function JazzForm({ entry, onClose }) {
         <textarea rows={4} value={review} onChange={(e) => setReview(e.target.value)} maxLength={4000} />
       </label>
       {err && <p className="notice" role="alert">{err}</p>}
-      <Actions busy={busy} onClose={onClose} saveLabel={entry ? "Save changes" : "Put it on the shelf"} onDelete={entry ? del : null} deleteLabel="Delete entry" />
+      <Actions busy={busy} saveDisabled={pending.length > 0} onClose={onClose} saveLabel={entry ? "Save changes" : "Put it on the shelf"} onDelete={entry ? del : null} deleteLabel="Delete entry" />
     </form>
   );
 }

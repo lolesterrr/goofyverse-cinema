@@ -2,6 +2,7 @@
 // Cloudflare dashboard or deploy it with wrangler (see README.md).
 //
 // Bindings:  GOOFY_KV      a KV namespace
+//            JAZZ_FILES    an R2 bucket for photos, music and video on the Jazz shelf (optional)
 // Variables: PROFILES      "Kensss,Goof" (comma separated, up to 8, add a friend here)
 //            ALLOWED_ORIGINS  "https://lolesterrr.github.io" (comma separated)
 // Secrets:   PASSPHRASE    the shared passphrase everybody types
@@ -13,6 +14,7 @@
 //   u:<profile>:jazz    that person's jazz shelf entries (only they write it)
 //   shared:watchlist    the shared watchlist
 //   shared:nights       the shared movie nights
+// Uploaded files live in the R2 bucket as jazz/<profile>/<random>.<ext>.
 
 const DAY = 86400;
 const TOKEN_TTL = 30 * DAY;
@@ -65,7 +67,7 @@ function corsHeaders(request, env) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type",
+    "access-control-allow-headers": "authorization,content-type,x-file-name",
     "access-control-max-age": "86400",
     vary: "Origin",
   };
@@ -247,6 +249,135 @@ function film(body) {
   };
 }
 
+/* ---------- files (R2) ---------- */
+
+// type -> [extension, biggest upload in MB]
+const FILE_TYPES = {
+  "image/jpeg": ["jpg", 15],
+  "image/png": ["png", 15],
+  "image/gif": ["gif", 15],
+  "image/webp": ["webp", 15],
+  "image/avif": ["avif", 15],
+  "audio/mpeg": ["mp3", 30],
+  "audio/mp4": ["m4a", 30],
+  "audio/x-m4a": ["m4a", 30],
+  "audio/aac": ["aac", 30],
+  "audio/wav": ["wav", 30],
+  "audio/x-wav": ["wav", 30],
+  "audio/ogg": ["ogg", 30],
+  "audio/flac": ["flac", 30],
+  "video/mp4": ["mp4", 60],
+  "video/webm": ["webm", 60],
+  "video/quicktime": ["mov", 60],
+};
+const MB = 1024 * 1024;
+const MAX_FILES_PER_ENTRY = 4;
+const OWNER_RE = /^[a-z0-9-]{1,40}$/;
+const FILE_RE = /^[A-Za-z0-9_-]{20,40}\.[a-z0-9]{2,4}$/;
+
+function needFiles(env) {
+  if (!env.JAZZ_FILES) throw new HttpError(503, "files-not-bound");
+}
+
+async function uploadFile(request, env, me) {
+  needFiles(env);
+  const type = String(request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const spec = FILE_TYPES[type];
+  if (!spec) throw new HttpError(415, "file-type");
+  const length = Number(request.headers.get("content-length"));
+  if (!Number.isInteger(length) || length <= 0) throw new HttpError(411, "length-required");
+  if (length > spec[1] * MB) throw new HttpError(413, "file-too-big");
+  let label = "";
+  try {
+    label = decodeURIComponent(request.headers.get("x-file-name") || "");
+  } catch {
+    /* keep it empty */
+  }
+  label = label.replace(/[\\/\u0000-\u001f]/g, "").trim().slice(0, 120);
+  const key = `${slug(me)}/${b64u(crypto.getRandomValues(new Uint8Array(18)))}.${spec[0]}`;
+  await env.JAZZ_FILES.put(`jazz/${key}`, request.body, { httpMetadata: { contentType: type } });
+  return json({ file: { key, type, size: length, name: label } }, 201);
+}
+
+async function serveFile(request, env, owner, name) {
+  needFiles(env);
+  if (!OWNER_RE.test(owner) || !FILE_RE.test(name)) throw new HttpError(404, "not-found");
+  let object;
+  try {
+    object = await env.JAZZ_FILES.get(`jazz/${owner}/${name}`, { range: request.headers });
+  } catch {
+    throw new HttpError(416, "range-invalid");
+  }
+  if (!object) throw new HttpError(404, "not-found");
+  const headers = new Headers({
+    "content-type": object.httpMetadata?.contentType || "application/octet-stream",
+    "accept-ranges": "bytes",
+    "cache-control": "public, max-age=31536000, immutable",
+    "x-content-type-options": "nosniff",
+    "content-disposition": "inline",
+    "cross-origin-resource-policy": "cross-origin",
+  });
+  if (object.httpEtag) headers.set("etag", object.httpEtag);
+  let status = 200;
+  const range = request.headers.get("range") ? object.range : null;
+  if (range) {
+    const offset = range.suffix !== undefined ? Math.max(object.size - range.suffix, 0) : range.offset || 0;
+    const length = range.suffix !== undefined ? object.size - offset : range.length ?? object.size - offset;
+    status = 206;
+    headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+    headers.set("content-length", String(length));
+  } else {
+    headers.set("content-length", String(object.size));
+  }
+  return new Response(object.body, { status, headers });
+}
+
+async function deleteFile(env, me, owner, name) {
+  needFiles(env);
+  if (owner !== slug(me) || !FILE_RE.test(name)) throw new HttpError(404, "not-found");
+  const key = `${owner}/${name}`;
+  const list = await load(env, KEY.jazz(me));
+  if (list.some((e) => (e.files || []).some((f) => f.key === key))) throw new HttpError(409, "file-in-use");
+  await env.JAZZ_FILES.delete(`jazz/${key}`);
+  return json({ ok: true });
+}
+
+// A jazz entry may only point at files its owner uploaded. Leaving `files` out
+// keeps what the entry already had, so an older copy of the site can't wipe them.
+async function checkFiles(env, me, value, existing) {
+  if (value === undefined || value === null) return existing;
+  if (!Array.isArray(value)) throw new HttpError(400, "files-invalid");
+  if (value.length > MAX_FILES_PER_ENTRY) throw new HttpError(400, "too-many-files");
+  const owner = slug(me);
+  const out = [];
+  const seen = new Set();
+  for (const f of value) {
+    const ok = f && typeof f === "object" && typeof f.key === "string" && f.key.startsWith(`${owner}/`) && FILE_RE.test(f.key.slice(owner.length + 1));
+    if (!ok || seen.has(f.key)) throw new HttpError(400, "files-invalid");
+    seen.add(f.key);
+    const known = existing.find((x) => x.key === f.key);
+    if (known) {
+      out.push(known);
+      continue;
+    }
+    needFiles(env);
+    const head = await env.JAZZ_FILES.head(`jazz/${f.key}`);
+    const type = head?.httpMetadata?.contentType;
+    if (!head || !FILE_TYPES[type]) throw new HttpError(400, "files-invalid");
+    out.push({ key: f.key, type, size: head.size, name: str(f.name, 120, { name: "file-name" }) });
+  }
+  return out;
+}
+
+async function dropFiles(env, files) {
+  if (!env.JAZZ_FILES || !files.length) return;
+  try {
+    await env.JAZZ_FILES.delete(files.map((f) => `jazz/${f.key}`));
+  } catch (err) {
+    console.error(err); // a leftover file is harmless; the entry itself is already saved
+  }
+}
+
 /* ---------- KV ---------- */
 
 const KEY = {
@@ -322,8 +453,14 @@ async function route(request, env) {
       kv: Boolean(env.GOOFY_KV),
       auth: Boolean(env.PASSPHRASE && env.SIGNING_KEY),
       tmdb: Boolean(env.TMDB_TOKEN),
+      files: Boolean(env.JAZZ_FILES),
     });
   }
+
+  // Uploaded files open by their long random address, so <img> and <audio> can
+  // load them without a token. Nobody can guess an address; it only ever appears
+  // inside the app's own data.
+  if (method === "GET" && a === "files" && b && c && !parts[4]) return serveFile(request, env, b, c);
 
   // Everything below the sign-in endpoints needs a token.
   if (method === "POST" && a === "profiles" && !b) {
@@ -389,28 +526,37 @@ async function route(request, env) {
     return json({ entry });
   }
 
+  // ----- files for the jazz shelf (own uploads only)
+  if (method === "POST" && a === "files" && !b) return uploadFile(request, env, me);
+  if (method === "DELETE" && a === "files" && b && c && !parts[4]) return deleteFile(env, me, b, c);
+
   // ----- jazz shelf (own entries only)
   if (a === "jazz" && b && !c && (method === "PUT" || method === "DELETE")) {
     const id = idOf(b);
     const list = await load(env, KEY.jazz(me));
     if (method === "DELETE") {
+      const gone = list.find((x) => x.id === id);
       await save(env, KEY.jazz(me), list.filter((x) => x.id !== id));
+      await dropFiles(env, gone?.files || []);
       return json({ ok: true });
     }
     const body = await readBody(request);
     const existing = list.find((x) => x.id === id);
+    const files = await checkFiles(env, me, body.files, existing?.files || []);
     const entry = {
       id,
       title: str(body.title, 200, { required: true, name: "title" }),
       category: str(body.category, 30, { required: true, name: "category" }).toLowerCase(),
       by: str(body.by, 120, { name: "by" }),
       link: linkOrEmpty(body.link),
+      files,
       rating: ratingOrNull(body.rating),
       review: str(body.review, 4000, { name: "review" }),
       createdAt: existing?.createdAt || nowIso(),
       updatedAt: nowIso(),
     };
     await save(env, KEY.jazz(me), upsert(list, entry));
+    await dropFiles(env, (existing?.files || []).filter((f) => !files.some((g) => g.key === f.key)));
     return json({ entry });
   }
 

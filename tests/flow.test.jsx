@@ -17,6 +17,14 @@ class FakeKV {
   async put(key, value) { this.map.set(key, String(value)); }
 }
 
+class FakeR2 {
+  constructor() { this.map = new Map(); }
+  async put(key, body, opts = {}) { this.map.set(key, { bytes: new Uint8Array(await new Response(body).arrayBuffer()), httpMetadata: opts.httpMetadata || {} }); }
+  async head(key) { const o = this.map.get(key); return o ? { size: o.bytes.length, httpMetadata: o.httpMetadata } : null; }
+  async get(key) { const o = this.map.get(key); return o ? { size: o.bytes.length, httpMetadata: o.httpMetadata, body: new Blob([o.bytes]).stream() } : null; }
+  async delete(keys) { for (const k of Array.isArray(keys) ? keys : [keys]) this.map.delete(k); }
+}
+
 const PASS = "open sesame";
 const MANIFEST = readFileSync(join(process.cwd(), "public/pierre/pierre.json"), "utf8");
 
@@ -43,7 +51,17 @@ function installFetch() {
     }
     if (url.hostname === "worker.test") {
       const headers = { ...(init.headers || {}), origin: "https://lolesterrr.github.io" };
-      return handle(new Request(url.toString(), { method: init.method || "GET", headers, body: init.body }), env);
+      let body = init.body;
+      if (body && typeof body !== "string" && typeof body.size === "number") {
+        // a File from jsdom: read it the way the browser would send it, with its length
+        body = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(new Uint8Array(reader.result));
+          reader.readAsArrayBuffer(body);
+        });
+        headers["content-length"] = String(body.length);
+      }
+      return handle(new Request(url.toString(), { method: init.method || "GET", headers, body }), env);
     }
     throw new Error(`unexpected fetch ${url}`);
   });
@@ -69,7 +87,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("gc.api", "https://worker.test");
-  env = { GOOFY_KV: new FakeKV(), PASSPHRASE: PASS, SIGNING_KEY: "k".repeat(40), PROFILES: "Kensss,Goof", ALLOWED_ORIGINS: "https://lolesterrr.github.io", TMDB_TOKEN: "x".repeat(120) };
+  env = { GOOFY_KV: new FakeKV(), PASSPHRASE: PASS, SIGNING_KEY: "k".repeat(40), PROFILES: "Kensss,Goof", ALLOWED_ORIGINS: "https://lolesterrr.github.io", TMDB_TOKEN: "x".repeat(120), JAZZ_FILES: new FakeR2() };
   realFetch = globalThis.fetch;
   installFetch();
 });
@@ -200,6 +218,44 @@ describe("the whole app against the real worker", () => {
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(await screen.findByLabelText(/passphrase/i)).toBeTruthy();
     expect(localStorage.getItem("gc.session")).toBeNull();
+  });
+
+  it("attaches a song to a jazz entry, plays it from the card, and cleans up an abandoned upload", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    mount();
+    await signInAs(user, "Kensss");
+    await user.click(screen.getByRole("link", { name: "Jazz" }));
+
+    // 1. a song goes up, a PDF is refused, and the entry saves with the song attached
+    await user.click(await screen.findByRole("button", { name: "Add to the shelf" }));
+    let dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/what is it/i), "So What");
+    const input = () => within(dialog).getByLabelText("Add photos, music or video");
+    await user.upload(input(), new File(["hi"], "notes.pdf", { type: "application/pdf" }));
+    expect(await within(dialog).findByText(/isn't a photo, song or video/)).toBeTruthy();
+    expect(env.JAZZ_FILES.map.size).toBe(0);
+    await user.upload(input(), new File([new Uint8Array(1500)], "so what.mp3", { type: "audio/mpeg" }));
+    expect(await within(dialog).findByText(/Song · so what\.mp3/)).toBeTruthy();
+    expect(env.JAZZ_FILES.map.size).toBe(1);
+    await user.click(within(dialog).getByRole("button", { name: "Put it on the shelf" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    const entry = JSON.parse(env.GOOFY_KV.map.get("u:kensss:jazz"))[0];
+    expect(entry.files).toHaveLength(1);
+    expect(entry.files[0]).toMatchObject({ type: "audio/mpeg", size: 1500, name: "so what.mp3" });
+    const player = await screen.findByLabelText("so what.mp3");
+    expect(player.tagName).toBe("AUDIO");
+    expect(player.getAttribute("src")).toBe(`https://worker.test/api/files/${entry.files[0].key}`);
+
+    // 2. a photo uploaded and then abandoned doesn't stay in the bucket
+    await user.click(await screen.findByRole("button", { name: "Add to the shelf" }));
+    dialog = await screen.findByRole("dialog");
+    await user.upload(input(), new File([new Uint8Array(800)], "cover.png", { type: "image/png" }));
+    expect(await within(dialog).findByText(/Photo · cover\.png/)).toBeTruthy();
+    expect(env.JAZZ_FILES.map.size).toBe(2);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(env.JAZZ_FILES.map.size).toBe(1));
+    expect(env.JAZZ_FILES.map.has(`jazz/${entry.files[0].key}`)).toBe(true);
   });
 
   it("shows each friend's takes together once both have logged the same film", async () => {

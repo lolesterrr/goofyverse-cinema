@@ -84,6 +84,17 @@ In this repo: **Settings > Pages > Build and deployment > Source: GitHub Actions
 
 Open <https://lolesterrr.github.io/goofyverse-cinema/>, type the passphrase, pick your name, and log something. Send your friend the link and the passphrase.
 
+### Optional: photos, music and video on the Jazz shelf
+
+Jazz entries can carry up to four uploaded files: photos (up to 15 MB after the phone shrinks them), songs (30 MB) and videos (60 MB). They live in a Cloudflare R2 bucket, which has a free monthly allowance (10 GB of storage), though Cloudflare asks you to turn R2 on first.
+
+1. In the Cloudflare dashboard open Storage & Databases > R2 object storage and turn R2 on.
+2. Create a bucket, for example `goofyverse-jazz`.
+3. In the worker: Settings > Bindings > Add > R2 bucket. Variable name must be exactly `JAZZ_FILES`, then pick the bucket.
+4. Open `https://<your worker>/api/health`. It should now say `"files":true`.
+
+Each file is opened through a long random address, so the file itself needs no sign in (that is what lets photos and songs play inside the page). Nobody can guess an address, but anyone who is handed one can open that one file. Without the bucket everything else works; the upload box just reports that storage isn't connected.
+
 ### Optional: deploy the worker from GitHub
 
 The [Worker workflow](.github/workflows/worker.yml) redeploys the worker when `worker/` changes. It needs two repo secrets, `CLOUDFLARE_API_TOKEN` (from the "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID`. Without them it does nothing. Your passphrase, signing key and TMDB token stay in Cloudflare.
@@ -126,8 +137,8 @@ then `cd worker && npx wrangler@4 dev`, and paste `http://localhost:8787` into t
 | Path | What it is |
 | --- | --- |
 | `src/` | The React app (Vite). `pages/` are the screens, `components/` the pieces, `lib/` the plain logic (taste match, stats, dates) |
-| `worker/index.js` | The whole backend: sign in, KV data, TMDB proxy |
-| `worker/wrangler.toml` | Worker config: profiles, allowed sites, KV binding |
+| `worker/index.js` | The whole backend: sign in, KV data, TMDB proxy, file uploads |
+| `worker/wrangler.toml` | Worker config: profiles, allowed sites, KV and R2 bindings |
 | `public/pierre/` | Pierre's sprite sheet and animation list, from the MMA site |
 | `tests/` | Worker tests, logic tests, page render tests, and an end-to-end flow test |
 
