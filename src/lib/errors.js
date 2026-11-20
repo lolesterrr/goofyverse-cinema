@@ -19,6 +19,7 @@ const TEXT = {
   "upload-expired": "That upload timed out. Add the file again.",
   "part-invalid": "A piece of that upload didn't go through. Add the file again.",
   "parts-invalid": "That upload didn't finish properly. Add the file again.",
+  "art-invalid": "That photo cannot be used there.",
   "files-not-bound": "The worker isn't connected to its file storage yet. Add the JAZZ_FILES binding.",
   "file-type": "I can only store photos, songs and videos.",
   "file-too-big": "That file is too big.",

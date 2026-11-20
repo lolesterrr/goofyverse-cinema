@@ -40,8 +40,21 @@ export function typeOf(file) {
 
 export const kindOfType = (type) => FILE_TYPES[type]?.kind || null;
 
-// The photo a jazz entry wears: the first image attached to it, if any.
-export const coverOf = (entry) => (entry?.files || []).find((f) => kindOfType(f.type) === "image") || null;
+// Which photo does which job on a jazz card. Each slot falls back to something
+// sensible, so an entry saved before any of this still looks right.
+export const imagesOf = (entry) => (entry?.files || []).filter((f) => kindOfType(f.type) === "image");
+
+const pick = (entry, slot) => {
+  const key = entry?.art?.[slot];
+  return key ? imagesOf(entry).find((f) => f.key === key) || null : null;
+};
+
+// the big one, shown whole: the one you chose, else the first photo
+export const coverOf = (entry) => pick(entry, "cover") || imagesOf(entry).find((f) => f.key !== entry?.art?.label) || null;
+// the little round one on the record: only if you chose it
+export const labelOf = (entry) => pick(entry, "label");
+// blurred behind the card: the one you chose, else the cover, unless you turned it off
+export const wallOf = (entry) => (entry?.art?.wallOff ? null : pick(entry, "wall") || coverOf(entry));
 
 export function fmtLimit(mb) {
   return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;

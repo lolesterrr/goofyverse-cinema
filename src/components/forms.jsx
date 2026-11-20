@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { useStore } from "../store.jsx";
 import { explain } from "../lib/errors.js";
 import { parseLink } from "../lib/embed.js";
-import { MAX_FILES, checkFile, checkPrepared, coverOf, fmtSize, kindOfType, prepare } from "../lib/files.js";
+import { MAX_FILES, checkFile, checkPrepared, coverOf, fmtSize, imagesOf, kindOfType, labelOf, prepare, wallOf } from "../lib/files.js";
 import { Cancelled, uploadFile } from "../lib/upload.js";
 import { KINDS, kindOf, toFilm } from "../lib/tmdb.js";
 import { defaultNightInput, fromLocalInput, todayStr, toLocalInput } from "../lib/dates.js";
@@ -273,6 +273,12 @@ export function NightForm({ night, film: filmProp, onClose }) {
 
 export const JAZZ_CATEGORIES = ["album", "track", "game", "book", "podcast", "food", "other"];
 
+const SLOTS = [
+  ["cover", "Cover", coverOf],
+  ["label", "Label", labelOf],
+  ["wall", "Wallpaper", wallOf],
+];
+
 export function JazzForm({ entry, onClose }) {
   const { saveJazz, removeJazz } = useStore();
   const [title, setTitle] = useState(entry?.title || "");
@@ -280,6 +286,7 @@ export function JazzForm({ entry, onClose }) {
   const [by, setBy] = useState(entry?.by || "");
   const [link, setLink] = useState(entry?.link || "");
   const [files, setFiles] = useState(entry?.files || []);
+  const [art, setArt] = useState(entry?.art || {});
   const [pending, setPending] = useState([]); // names of files still going up
   const [fileErr, setFileErr] = useState("");
   const fresh = useRef(new Set()); // files uploaded during this edit
@@ -337,18 +344,22 @@ export function JazzForm({ entry, onClose }) {
     }
   }
 
-  // the first photo is the cover, so making one the cover just moves it to the front
-  function makeCover(f) {
-    setFiles((list) => [f, ...list.filter((x) => x.key !== f.key)]);
+  // cover, label and wallpaper: click a job to give it to that photo, click again to take it back
+  function toggleSlot(slot, f) {
+    setArt((a) => ({ ...a, [slot]: a[slot] === f.key ? "" : f.key, ...(slot === "wall" ? { wallOff: false } : {}) }));
   }
 
   function removeFile(f) {
     setFiles((list) => list.filter((x) => x.key !== f.key));
+    setArt((a) => Object.fromEntries(Object.entries(a).filter(([, v]) => v !== f.key)));
     if (fresh.current.has(f.key)) {
       fresh.current.delete(f.key);
       api.delFile(f.key).catch(() => {});
     }
   }
+
+  const shape = { files, art };
+  const photos = imagesOf(shape);
 
   async function submit(e) {
     e.preventDefault();
@@ -360,7 +371,7 @@ export function JazzForm({ entry, onClose }) {
     setBusy(true);
     setErr("");
     try {
-      await saveJazz({ ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}), title, category, by, link: link.trim(), files, rating, review });
+      await saveJazz({ ...(entry ? { id: entry.id, createdAt: entry.createdAt } : {}), title, category, by, link: link.trim(), files, art, rating, review });
       saved.current = true;
       onClose();
     } catch (error) {
@@ -424,20 +435,27 @@ export function JazzForm({ entry, onClose }) {
           <ul className="attach-list">
             {files.map((f) => {
               const isImage = kindOfType(f.type) === "image";
-              const isCover = isImage && coverOf({ files }).key === f.key;
+              const name = f.name || f.key.split("/")[1];
               return (
-                <li key={f.key}>
+                <li key={f.key} className="attach-row">
                   <span className="attach-name">
-                    {isImage ? "Photo" : kindOfType(f.type) === "video" ? "Video" : "Song"} · {f.name || f.key.split("/")[1]} · {fmtSize(f.size)}
-                    {isCover && <span className="badge gold-badge cover-badge">On the record</span>}
+                    {isImage ? "Photo" : kindOfType(f.type) === "video" ? "Video" : "Song"} · {name} · {fmtSize(f.size)}
                   </span>
-                  <span className="row">
-                    {isImage && !isCover && (
-                      <button type="button" className="link-btn" onClick={() => makeCover(f)} aria-label={`Put ${f.name || "this photo"} on the record`}>
-                        Use as cover
-                      </button>
-                    )}
-                    <button type="button" className="link-btn" onClick={() => removeFile(f)} aria-label={`Remove ${f.name || "file"}`}>
+                  <span className="row wrap attach-jobs">
+                    {isImage &&
+                      SLOTS.map(([slot, label, chosen]) => (
+                        <button
+                          key={slot}
+                          type="button"
+                          className="chip small"
+                          aria-pressed={chosen(shape)?.key === f.key}
+                          onClick={() => toggleSlot(slot, f)}
+                          aria-label={`${label} for ${name}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    <button type="button" className="link-btn" onClick={() => removeFile(f)} aria-label={`Remove ${name}`}>
                       Remove
                     </button>
                   </span>
@@ -456,6 +474,14 @@ export function JazzForm({ entry, onClose }) {
               </li>
             ))}
           </ul>
+        )}
+        {photos.length > 0 && (
+          <p className="muted small-text">
+            The cover is shown whole, the label rides in the middle of the record, and the wallpaper sits blurred behind the card.{" "}
+            <button type="button" className="link-btn" aria-pressed={Boolean(art.wallOff)} onClick={() => setArt((a) => ({ ...a, wallOff: !a.wallOff }))}>
+              {art.wallOff ? "Turn the wallpaper back on" : "No wallpaper on this one"}
+            </button>
+          </p>
         )}
         {fileErr && <p className="notice" role="alert">{fileErr}</p>}
       </div>

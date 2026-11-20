@@ -463,6 +463,25 @@ async function checkFiles(env, me, value, existing) {
   return out;
 }
 
+// Which photo does which job on the card. Anything pointing at a file that is no
+// longer attached is quietly dropped, so removing a photo can't wedge an entry.
+const ART_SLOTS = ["cover", "label", "wall"];
+
+function artOf(value, files, existing = null) {
+  if (value === undefined || value === null) return existing;
+  if (typeof value !== "object" || Array.isArray(value)) throw new HttpError(400, "art-invalid");
+  const images = new Set(files.filter((f) => String(f.type).startsWith("image/")).map((f) => f.key));
+  const out = {};
+  for (const slot of ART_SLOTS) {
+    const key = value[slot];
+    if (key === undefined || key === null || key === "") continue;
+    if (typeof key !== "string") throw new HttpError(400, "art-invalid");
+    if (images.has(key)) out[slot] = key;
+  }
+  if (value.wallOff === true) out.wallOff = true;
+  return Object.keys(out).length ? out : null;
+}
+
 async function dropFiles(env, files) {
   if (!env.JAZZ_FILES || !files.length) return;
   try {
@@ -648,6 +667,7 @@ async function route(request, env) {
       by: str(body.by, 120, { name: "by" }),
       link: linkOrEmpty(body.link),
       files,
+      art: artOf(body.art, files, existing?.art || null),
       rating: ratingOrNull(body.rating),
       review: str(body.review, 4000, { name: "review" }),
       createdAt: existing?.createdAt || nowIso(),

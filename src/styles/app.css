@@ -282,6 +282,13 @@ dialog.modal::backdrop { background: rgb(4 3 5 / 0.8); }
 .jazz-card.has-wall::after { content: ""; position: absolute; inset: -20%; z-index: -1; pointer-events: none; }
 .jazz-card.has-wall::before { background-image: var(--wall); background-size: cover; background-position: center; filter: blur(24px) saturate(1.4); opacity: 0.75; }
 .jazz-card.has-wall::after { background: linear-gradient(100deg, rgba(11, 10, 12, 0.88) 18%, rgba(11, 10, 12, 0.62) 60%, rgba(11, 10, 12, 0.72)); }
+.jazz-art { position: relative; flex: none; width: 112px; height: 96px; }
+.jazz-art .vinyl { position: absolute; right: 0; top: 8px; width: 80px; height: 80px; }
+.jazz-cover { position: absolute; left: 0; top: 0; display: block; width: 96px; height: 96px; border-radius: 3px; overflow: hidden; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.jazz-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.jazz-card.compact .jazz-art { width: 84px; height: 72px; }
+.jazz-card.compact .jazz-art .vinyl { width: 60px; height: 60px; top: 6px; }
+.jazz-card.compact .jazz-cover { width: 72px; height: 72px; }
 .vinyl { position: relative; flex: none; width: 84px; height: 84px; border-radius: 50%; border: 2px solid var(--line2); overflow: hidden; }
 .vinyl.has-label { display: block; background: repeating-radial-gradient(circle, #1c1419 0 2px, #120e13 2px 4px); }
 .vinyl.has-label img { position: absolute; inset: 18%; width: 64%; height: 64%; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
@@ -303,7 +310,9 @@ dialog.modal::backdrop { background: rgb(4 3 5 / 0.8); }
 .attach-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .attach-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .attach-name { overflow-wrap: anywhere; }
-.cover-badge { margin-left: 8px; }
+.attach-row { flex-wrap: wrap; align-items: baseline; }
+.attach-jobs { gap: 8px; }
+.chip.small { min-height: 32px; padding: 0 10px; font-size: 12px; }
 .attach-list .row { display: flex; gap: 12px; flex: none; }
 input[type="file"] { font: inherit; color: var(--text); max-width: 100%; }
 input[type="file"]::file-selector-button { font: inherit; font-weight: 700; margin-right: 12px; min-height: 44px; padding: 0 16px; border: 2px solid var(--line2); border-radius: 4px; background: none; color: var(--text); cursor: pointer; }

@@ -35,7 +35,21 @@ const sample = {
     Goof: [log("b1", whiplash, 4, "2026-10-20"), log("b2", heat, null, "2026-09-01")],
   },
   jazz: {
-    Kensss: [{ id: "j1", title: "Kind of Blue", category: "album", by: "Miles Davis", rating: 5, review: "Perfect.", createdAt: "2026-10-01T10:00:00Z" }],
+    Kensss: [
+      { id: "j1", title: "Kind of Blue", category: "album", by: "Miles Davis", rating: 5, review: "Perfect.", createdAt: "2026-10-01T10:00:00Z" },
+      // one photo, used only as the label on the record, with no wallpaper
+      {
+        id: "j3",
+        title: "Wong Kar-wai",
+        category: "other",
+        by: "",
+        rating: 5,
+        review: "",
+        files: [{ key: "kensss/CCCCCCCCCCCCCCCCCCCCCCCC.png", type: "image/png", size: 700, name: "wong.png" }],
+        art: { label: "kensss/CCCCCCCCCCCCCCCCCCCCCCCC.png", wallOff: true },
+        createdAt: "2026-10-03T10:00:00Z",
+      },
+    ],
     Goof: [{ id: "j2", title: "Hades", category: "game", by: "", rating: 4, review: "", link: "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", files: [{ key: "goof/AAAAAAAAAAAAAAAAAAAAAAAA.mp3", type: "audio/mpeg", size: 1500, name: "hades theme.mp3" }, { key: "goof/BBBBBBBBBBBBBBBBBBBBBBBB.jpg", type: "image/jpeg", size: 900, name: "cover.jpg" }], createdAt: "2026-10-02T10:00:00Z" }],
   },
   watchlist: [{ id: "w1", ...heat, note: "friday", addedBy: "Goof", addedAt: "2026-10-01T10:00:00Z" }],
@@ -101,12 +115,16 @@ describe("pages with data", () => {
     expect(jazz).toContain("/api/files/goof/AAAAAAAAAAAAAAAAAAAAAAAA.mp3"); // the song plays from the card
     expect(jazz).toContain("<audio");
     expect(jazz).toContain("/api/files/goof/BBBBBBBBBBBBBBBBBBBBBBBB.jpg");
-    // the photo rides on the record and tints the card, and isn't repeated underneath
-    expect(jazz).toContain("vinyl has-label");
+    // Hades: its photo is the cover and, blurred, the wallpaper, and isn't repeated underneath
+    expect(jazz).toContain("jazz-cover");
     expect(jazz).toContain("jazz-card has-wall");
     expect(jazz).toContain("--wall:url(&quot;/api/files/goof/BBBBBBBBBBBBBBBBBBBBBBBB.jpg&quot;)");
-    expect(jazz.match(/BBBBBBBBBBBBBBBBBBBBBBBB\.jpg/g)).toHaveLength(3); // label img, its link, the wallpaper
+    expect(jazz.match(/BBBBBBBBBBBBBBBBBBBBBBBB\.jpg/g)).toHaveLength(3); // cover img, its link, the wallpaper
     expect(jazz).not.toContain("attach-photo");
+    // Wong Kar-wai: the same photo asked for the label only, so no square cover and no wallpaper
+    expect(jazz).toContain("vinyl has-label");
+    expect(jazz.match(/CCCCCCCCCCCCCCCCCCCCCCCC\.png/g)).toHaveLength(1);
+    expect(jazz).not.toContain("--wall:url(&quot;/api/files/kensss");
     expect(jazz).toMatch(/Open on (<!-- -->)?open\.spotify\.com/);
     const us = render(<Us />);
     expect(us).toContain("agree, within half a star");
@@ -157,6 +175,7 @@ describe("gate, layout and dialogs", () => {
     expect(open("jazz")).toContain("Put it on the shelf");
     expect(open("jazz")).toContain("Link (optional");
     expect(open("jazz")).toContain("Add photos, music or video");
+    expect(open("jazz", { entry: sample.jazz.Kensss[1] })).toContain("Wallpaper");
     expect(open("jazz", { entry: sample.jazz.Kensss[0] })).toContain("Delete entry");
     expect(open("queue")).toContain("Search for a film, series or anime");
     expect(open("film", { film: whiplash })).toContain("Log it");

@@ -674,3 +674,54 @@ describe("chunked uploads for big songs and videos", () => {
     expect(env.JAZZ_FILES.map.size).toBe(0);
   });
 });
+
+describe("which photo does which job", () => {
+  const env = () => makeEnv({ JAZZ_FILES: new FakeR2() });
+  const put = (e, token, body) => call(e, "PUT", "/api/jazz/jazz-art", { title: "Art", category: "other", ...body }, token);
+
+  it("keeps the jobs you set and forgets the ones you take back", async () => {
+    const e = env();
+    const kens = await signIn(e, "Kensss");
+    const a = (await upload(e, kens, "image/png", 100, "a.png")).body.file;
+    const b = (await upload(e, kens, "image/jpeg", 100, "b.jpg")).body.file;
+
+    const first = await put(e, kens, { files: [a, b], art: { cover: b.key, label: a.key } });
+    expect(first.body.entry.art).toEqual({ cover: b.key, label: a.key });
+
+    // left out, so it stays as it was
+    expect((await put(e, kens, { files: [a, b] })).body.entry.art).toEqual({ cover: b.key, label: a.key });
+    // sent empty, so it goes
+    expect((await put(e, kens, { files: [a, b], art: { cover: "", label: "" } })).body.entry.art).toBeNull();
+    expect((await put(e, kens, { files: [a, b], art: { wallOff: true } })).body.entry.art).toEqual({ wallOff: true });
+  });
+
+  it("refuses a job on a file that isn't a photo of yours, and bad shapes", async () => {
+    const e = env();
+    const kens = await signIn(e, "Kensss");
+    const goof = await signIn(e, "Goof");
+    const photo = (await upload(e, kens, "image/png", 100, "a.png")).body.file;
+    const song = (await upload(e, kens, "audio/mpeg", 100, "a.mp3")).body.file;
+    const theirs = (await upload(e, goof, "image/png", 100, "g.png")).body.file;
+
+    // a song, someone else's photo, or one that was never attached: quietly dropped
+    const dropped = await put(e, kens, { files: [photo, song], art: { cover: song.key, label: theirs.key, wall: "kensss/AAAAAAAAAAAAAAAAAAAAAAAA.png" } });
+    expect(dropped.status).toBe(200);
+    expect(dropped.body.entry.art).toBeNull();
+
+    for (const art of ["cover", 5, [photo.key], { cover: 7 }, { label: { key: photo.key } }]) {
+      const r = await put(e, kens, { files: [photo], art });
+      expect(r.status).toBe(400);
+      expect(r.body.error).toBe("art-invalid");
+    }
+  });
+
+  it("drops a job when its photo is taken off the entry", async () => {
+    const e = env();
+    const kens = await signIn(e, "Kensss");
+    const a = (await upload(e, kens, "image/png", 100, "a.png")).body.file;
+    const b = (await upload(e, kens, "image/jpeg", 100, "b.jpg")).body.file;
+    await put(e, kens, { files: [a, b], art: { cover: a.key, wall: b.key } });
+    const after = await put(e, kens, { files: [b], art: { cover: a.key, wall: b.key } });
+    expect(after.body.entry.art).toEqual({ wall: b.key });
+  });
+});

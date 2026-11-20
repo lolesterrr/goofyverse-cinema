@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MB, SINGLE_MAX, checkFile, checkPrepared, coverOf, fmtLimit, fmtSize, kindOfType, prepare, typeOf } from "../src/lib/files.js";
+import { MB, SINGLE_MAX, checkFile, checkPrepared, coverOf, fmtLimit, fmtSize, imagesOf, kindOfType, labelOf, prepare, typeOf, wallOf } from "../src/lib/files.js";
 
 const file = (name, type, size = 1000) => ({ name, type, size });
 
@@ -49,15 +49,39 @@ describe("upload rules", () => {
     expect(fmtLimit(5120)).toBe("5 GB");
   });
 
-  it("puts the first photo on the record, ignoring songs and videos", () => {
-    const song = { key: "k/a.mp3", type: "audio/mpeg" };
-    const one = { key: "k/b.jpg", type: "image/jpeg" };
-    const two = { key: "k/c.png", type: "image/png" };
+  const song = { key: "k/a.mp3", type: "audio/mpeg" };
+  const one = { key: "k/b.jpg", type: "image/jpeg" };
+  const two = { key: "k/c.png", type: "image/png" };
+
+  it("falls back to the first photo when no jobs are set", () => {
     expect(coverOf({ files: [song, one, two] })).toBe(one);
-    expect(coverOf({ files: [two, one] })).toBe(two); // whichever is first wins
-    expect(coverOf({ files: [song] })).toBeNull();
-    expect(coverOf({ files: [] })).toBeNull();
-    expect(coverOf({})).toBeNull();
+    expect(wallOf({ files: [song, one, two] })).toBe(one); // the wallpaper follows the cover
+    expect(labelOf({ files: [one] })).toBeNull(); // the label is only ever on purpose
+    expect(imagesOf({ files: [song, one, two] })).toEqual([one, two]);
+    for (const empty of [{ files: [song] }, { files: [] }, {}]) {
+      expect(coverOf(empty)).toBeNull();
+      expect(wallOf(empty)).toBeNull();
+    }
+  });
+
+  it("gives each photo the job it was handed", () => {
+    const files = [song, one, two];
+    expect(coverOf({ files, art: { cover: two.key } })).toBe(two);
+    expect(labelOf({ files, art: { label: two.key } })).toBe(two);
+    expect(wallOf({ files, art: { wall: two.key } })).toBe(two);
+    expect(wallOf({ files, art: { cover: two.key } })).toBe(two); // still follows the cover
+    expect(wallOf({ files, art: { wallOff: true } })).toBeNull();
+    // one photo asked for the label alone: it stays off the cover instead of doing both
+    expect(coverOf({ files: [one], art: { label: one.key } })).toBeNull();
+    expect(coverOf({ files: [one, two], art: { label: one.key } })).toBe(two);
+  });
+
+  it("ignores a job pointing at a photo that isn't there any more", () => {
+    const files = [one];
+    expect(coverOf({ files, art: { cover: "k/gone.jpg" } })).toBe(one);
+    expect(labelOf({ files, art: { label: "k/gone.jpg" } })).toBeNull();
+    expect(wallOf({ files, art: { wall: "k/gone.jpg" } })).toBe(one);
+    expect(coverOf({ files, art: { cover: song.key } })).toBe(one); // a song can't be a cover
   });
 
   it("writes sizes people can read", () => {
